@@ -1,0 +1,124 @@
+<div class="twin-wrapper" [class.twin-wrapper-fleet]="!!fleetRobots">
+
+  <!-- 3D Scene -->
+  <div class="twin-container" #twinContainer>
+    <canvas #twinCanvas></canvas>
+    <div class="twin-hud-top">
+      <span class="twin-indicator"></span>
+      <span>DIGITAL TWIN</span>
+    </div>
+    <div class="twin-hud-bottom">
+      <span class="twin-stat">SPD: {{robotState?.speed || 0}}%</span>
+      <span class="twin-stat">{{statusLabel}}</span>
+    </div>
+  </div>
+
+  <!-- LOCAL MAP (Team mode only) -->
+  <div *ngIf="fleetRobots" class="localmap-panel">
+    <div class="localmap-header">
+      <div class="localmap-title">
+        <span class="localmap-dot"></span>
+        <span>LOCAL MAP</span>
+      </div>
+      <span class="localmap-count">{{fleetMapItems.length}} robot</span>
+    </div>
+
+    <div class="localmap-zoombar">
+      <span class="localmap-zoomlabel">ZOOM</span>
+      <input type="range" class="localmap-zoomslider"
+             [min]="mapRangeMin" [max]="mapRangeMax" step="0.1"
+             [value]="mapRange"
+             (input)="mapRange = +$any($event.target).value">
+      <span class="localmap-zoomval">{{mapRange.toFixed(1)}}m</span>
+    </div>
+
+    <!-- Placement toolbar -->
+    <div class="localmap-tools">
+      <button class="tool-btn tool-base"
+              [class.active]="placingType === 'base'"
+              (click)="startPlacing('base')"
+              title="Üs (Base) noktası ekle">
+        <span>🏠</span><span>Üs Ekle</span>
+      </button>
+      <button class="tool-btn tool-target"
+              [class.active]="placingType === 'target'"
+              (click)="startPlacing('target')"
+              title="Hedef (Target) noktası ekle">
+        <span>🎯</span><span>Hedef Ekle</span>
+      </button>
+    </div>
+
+    <!-- Map area -->
+    <div class="localmap-canvas"
+         [class.has-selection]="!!selectedFleetRobotId"
+         [class.placing]="!!placingType"
+         [style.width.px]="mapSize" [style.height.px]="mapSize"
+         (wheel)="onMapWheel($event)"
+         (click)="onMapClick($event)">
+      <div class="localmap-axis localmap-axis-v"></div>
+      <div class="localmap-axis localmap-axis-h"></div>
+      <div class="localmap-ring localmap-ring-1"></div>
+      <div class="localmap-ring localmap-ring-2"></div>
+      <div class="localmap-ring localmap-ring-3"></div>
+
+      <!-- Waypoint markers -->
+      <div *ngFor="let wp of waypointMapItems"
+           class="localmap-waypoint"
+           [class.wp-base]="wp.type === 'base'"
+           [class.wp-target]="wp.type === 'target'"
+           [style.left.px]="wp.px - 14"
+           [style.top.px]="wp.py - 14"
+           (click)="$event.stopPropagation()">
+        <span class="wp-icon">{{wp.icon}}</span>
+        <span class="wp-label">{{wp.name}}</span>
+      </div>
+
+      <!-- Robot markers -->
+      <button *ngFor="let it of fleetMapItems"
+              class="localmap-marker"
+              [class.selected]="it.selected"
+              (click)="$event.stopPropagation(); onMapSelect(it.id)"
+              [title]="it.name"
+              [style.left.px]="it.px - 18"
+              [style.top.px]="it.py - 18">
+        <span class="localmap-marker-icon">{{typeIcon(it.type)}}</span>
+        <span class="localmap-marker-label">{{it.name}}</span>
+      </button>
+    </div>
+
+    <!-- Selection info -->
+    <div class="localmap-info">
+      <span class="localmap-info-label">SEÇİLİ</span>
+      <span class="localmap-info-value">{{selectedFleetRobotName}}</span>
+    </div>
+
+    <!-- Hint -->
+    <div class="localmap-hint">
+      <span *ngIf="placingType === 'base'">📍 Haritada üs konumuna tıklayın</span>
+      <span *ngIf="placingType === 'target'">📍 Haritada hedef konumuna tıklayın</span>
+      <span *ngIf="!placingType && !selectedFleetRobotId">① Bir robota tıklayın</span>
+      <span *ngIf="!placingType && selectedFleetRobotId">② Hedefe tıklayın veya aşağıdan hızlı git komutu seçin</span>
+    </div>
+
+    <!-- Waypoint List & Commands -->
+    <div *ngIf="waypoints.length > 0" class="localmap-wplist">
+      <div class="localmap-wplist-title">📌 İŞARETLİ NOKTALAR</div>
+      <div class="localmap-wplist-items">
+        <div *ngFor="let wp of waypoints"
+             class="wp-item"
+             [class.wp-item-base]="wp.type === 'base'"
+             [class.wp-item-target]="wp.type === 'target'">
+          <span class="wp-item-icon">{{ wp.type === 'base' ? '🏠' : '🎯' }}</span>
+          <span class="wp-item-name">{{wp.name}}</span>
+          <span class="wp-item-coords">({{wp.x.toFixed(1)}}, {{wp.z.toFixed(1)}})</span>
+          <button class="wp-item-go"
+                  (click)="goToWaypoint(wp)"
+                  [title]="selectedFleetRobotId ? 'Seçili robotu gönder' : 'Tüm takımı gönder'">
+            ► GİT
+          </button>
+          <button class="wp-item-del" (click)="removeWaypoint(wp.id, $event)" title="Sil">✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

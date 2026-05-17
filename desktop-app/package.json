@@ -1,0 +1,57 @@
+{
+  "name": "robot-kopek-kontrol",
+  "version": "1.0.0",
+  "description": "ESP32 Robot Köpek Angular Kontrol Paneli",
+  "main": "electron/main.js",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build --base-href ./",
+    "electron:dev": "concurrently \"ng serve\" \"wait-on http://localhost:4200 && cross-env ELECTRON_IS_DEV=1 electron .\"",
+    "electron:build": "ng build --base-href ./ && electron-builder",
+    "dist": "ng build --base-href ./ && electron-builder"
+  },
+  "build": {
+    "appId": "com.robokopek.control",
+    "productName": "Robot Kopek",
+    "directories": {
+      "output": "dist-app"
+    },
+    "files": [
+      "dist/desktop-app/**",
+      "electron/**"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/animations": "^17.0.0",
+    "@angular/common": "^17.0.0",
+    "@angular/compiler": "^17.0.0",
+    "@angular/core": "^17.0.0",
+    "@angular/forms": "^17.0.0",
+    "@angular/platform-browser": "^17.0.0",
+    "@angular/platform-browser-dynamic": "^17.0.0",
+    "@angular/router": "^17.0.0",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.22.0",
+    "rxjs": "~7.8.0",
+    "three": "^0.184.0",
+    "tslib": "^2.3.0",
+    "zone.js": "~0.14.2"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "^17.0.0",
+    "@angular/cli": "^17.0.0",
+    "@angular/compiler-cli": "^17.0.0",
+    "@types/three": "^0.184.1",
+    "concurrently": "^8.0.0",
+    "cross-env": "^7.0.3",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "typescript": "~5.2.2",
+    "wait-on": "^7.0.0"
+  }
+}

@@ -1,0 +1,510 @@
+<div class="app-layout">
+  <!-- GLOBAL CATEGORY SIDEBAR -->
+  <aside class="category-sidebar">
+    <button class="cat-btn" [class.active]="sidebarCategory === 'robots'" (click)="sidebarCategory = 'robots'" title="Robotlar">
+      👤
+    </button>
+    <button class="cat-btn" [class.active]="sidebarCategory === 'teams'" (click)="sidebarCategory = 'teams'" title="Takımlar">
+      👥
+    </button>
+    
+    <div style="margin-top: auto; color: var(--text-muted); font-size: 10px; font-weight: 700; transform: rotate(-90deg); margin-bottom: 20px; white-space: nowrap;">
+      FLEET v2.0
+    </div>
+  </aside>
+
+
+  <!-- LEFT SIDEBAR: Robot List -->
+  
+  <aside class="robot-list-sidebar">
+    <!-- Header depends on category -->
+    <div style="display: flex; align-items: center; gap: 10px; padding: 4px; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px;">
+      <span style="font-size: 26px;">{{ sidebarCategory === 'robots' ? '🤖' : '🛡️' }}</span>
+      <div>
+        <div style="font-weight: 700; font-size: 15px; letter-spacing: -0.3px;">{{ sidebarCategory === 'robots' ? 'Robot Filosu' : 'Takım Yönetimi' }}</div>
+        <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 1px;">KONTROL MERKEZİ</div>
+      </div>
+    </div>
+
+    <!-- ROBOT LIST -->
+    <div class="robot-items" *ngIf="sidebarCategory === 'robots'">
+      <button *ngFor="let r of robots" class="robot-item" [class.active]="activeRobot === r" (click)="selectRobot(r)">
+        <span class="type-icon">{{getTypeIcon(r.config.type)}}</span>
+        <div class="robot-info">
+          <div class="r-name">{{r.config.name}}</div>
+          <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+            <div class="status-dot" [ngClass]="r.status"></div>
+            <span style="font-size: 9px; color: var(--text-muted); text-transform: uppercase;">{{r.status}}</span>
+          </div>
+        </div>
+      </button>
+    </div>
+
+    <!-- TEAM LIST -->
+    <div class="robot-items" *ngIf="sidebarCategory === 'teams'">
+      <button *ngFor="let t of teams" class="robot-item" [class.active]="activeTeam === t" (click)="selectTeam(t)">
+        <span class="type-icon">🛡️</span>
+        <div class="robot-info">
+          <div class="r-name">{{t.name}}</div>
+          <div style="font-size: 10px; color: var(--text-muted);">{{t.robotIds.length}} Robot</div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Footer Actions -->
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px;">
+      <!-- Senkron Kontrol Modu (only for robots?) -->
+      <label *ngIf="sidebarCategory === 'robots'" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 12px; background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); border: 1px solid var(--border);">
+        <input type="checkbox" [(ngModel)]="syncMode" style="width: 16px; height: 16px; accent-color: var(--accent);">
+        <span style="font-size: 11px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.5px;">Senkron Mod</span>
+      </label>
+
+      <button class="btn-primary" style="padding: 12px; border-radius: 8px;" (click)="openTeamModal()">
+        🛡️ Takım Oluştur
+      </button>
+      
+      <button class="btn-ghost" style="border: 1px dashed var(--border); padding: 12px; border-radius: 8px;" (click)="openAddModal()">
+        + Yeni Robot Ekle
+      </button>
+    </div>
+  </aside>
+
+
+  <!-- EMPTY STATE -->
+  <div class="empty-state" *ngIf="!activeRobot && !activeTeam">
+    <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;">📡</div>
+    <h3>Seçili Robot Yok</h3>
+    <p style="color: var(--text-muted); margin-top: 8px;">Listeden bir robot seçin veya yeni bir robot ekleyin.</p>
+  </div>
+
+  <!-- ROBOT WORKSPACE -->
+  <div class="robot-workspace"
+       [class.team-mode]="!!activeTeam"
+       [class.team-collapsed]="!!activeTeam && teamSidebarCollapsed"
+       *ngIf="activeRobot || activeTeam">
+    
+    <!-- LEFT PANEL: Config & Status -->
+    <aside *ngIf="activeRobot" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid var(--border); overflow-y: auto;">
+      
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>{{getTypeIcon(activeRobot.config.type)}}</span>
+          <span>{{activeRobot.config.name}}</span>
+        </div>
+        <button class="btn-ghost" (click)="openEditModal(activeRobot)">Ayarlar</button>
+      </div>
+
+      <!-- Connection Panel -->
+      <div class="glass-panel" style="padding: 16px;">
+        <app-connection-panel
+          [ip]="activeRobot.config.ip"
+          [status]="activeRobot.status"
+          (connect)="connectActive()"
+          (disconnect)="disconnectActive()"
+          (provisionWifi)="provisionActiveWifi($event)"
+          (resetWifi)="resetActiveWifi()">
+        </app-connection-panel>
+      </div>
+
+        <!-- Robot Status & Modules -->
+      <div class="glass-panel" style="padding: 16px;">
+        <div class="section-label">📊 Robot Durumu & Sensörler</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="stat-card">
+            <span class="stat-label">Hız</span>
+            <span class="stat-value accent">{{activeRobot.state.speed}}%</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Hareket</span>
+            <span class="stat-value" [ngStyle]="{'color': activeRobot.state.sitting ? 'var(--warn)' : activeRobot.state.walking ? 'var(--success)' : 'var(--text-secondary)', 'font-size': '11px'}">
+              {{ activeRobot.state.sitting ? 'Oturuyor' : activeRobot.state.walking ? 'Yürüyor' : 'Bekliyor' }}
+            </span>
+          </div>
+          <!-- Dynamic Module Panels -->
+          <div class="stat-card" *ngIf="activeRobot.config.modules?.includes('temperature')">
+            <span class="stat-label">Sıcaklık</span>
+            <span class="stat-value" style="color: #ef4444;">{{activeRobot.state.temperature || '--'}}°C</span>
+          </div>
+          <div class="stat-card" *ngIf="activeRobot.config.modules?.includes('ultrasonic') || activeRobot.config.modules?.includes('tof')">
+            <span class="stat-label">Mesafe</span>
+            <span class="stat-value" style="color: #3b82f6;">{{activeRobot.state.distance || '--'}} cm</span>
+          </div>
+          <div class="stat-card" *ngIf="activeRobot.config.modules?.includes('compass')">
+            <span class="stat-label">Yön (ham / efektif)</span>
+            <span class="stat-value" style="color: #a78bfa; font-size: 11px;">
+              {{activeRobot.state.heading ?? '--'}}° / {{(activeRobot.effectiveHeading() | number:'1.0-0') ?? '--'}}°
+            </span>
+            <button class="btn-ghost" style="font-size: 9px; padding: 2px 4px; margin-top: 2px;"
+                    [disabled]="activeRobot.status !== 'online'"
+                    (click)="zeroHeading()">
+              🧭 İleri = Şu An
+            </button>
+          </div>
+          <div class="stat-card" *ngIf="activeRobot.config.modules?.includes('imu')">
+            <span class="stat-label">Eğim Z</span>
+            <span class="stat-value" style="color: #f59e0b;">{{(activeRobot.state.gz || 0).toFixed(2)}}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Speed & Steps -->
+      <div class="glass-panel" style="padding: 16px;">
+        <div class="section-label">⚡ Hız & Adım</div>
+        
+        <div style="margin-bottom: 4px; font-size: 11px; color: var(--text-muted);">Hız</div>
+        <div class="slider-row" style="margin-bottom: 12px;">
+          <input type="range" min="10" max="100"
+            [value]="activeRobot.state.speed"
+            (input)="setSpeedEvent($event)"
+            (mouseup)="setSpeedActive(activeRobot.state.speed)"
+            (touchend)="setSpeedActive(activeRobot.state.speed)"
+            [disabled]="activeRobot ? activeRobot.status !== 'online' : false"
+          />
+          <span class="slider-val">{{activeRobot.state.speed}}</span>
+        </div>
+
+        <div style="margin-bottom: 4px; font-size: 11px; color: var(--text-muted);">Adım Sayısı</div>
+        <div class="slider-row">
+          <input type="range" min="1" max="20" [value]="steps" (input)="setSteps($event)" />
+          <span class="slider-val">{{steps}}</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons (Only for Dog) -->
+      <div class="glass-panel" style="padding: 16px;" *ngIf="activeRobot.config.type === 'dog'">
+        <div class="section-label">🎯 Hızlı Komutlar</div>
+        <div class="action-grid">
+          <button *ngFor="let btn of actionButtons"
+            class="action-btn"
+            (click)="sendCommand(btn.cmd)"
+            [disabled]="activeRobot ? activeRobot.status !== 'online' : false"
+            [style.opacity]="(activeRobot && activeRobot.status === 'online') || activeTeam ? 1 : 0.4">
+            <span>{{btn.icon}}</span>
+            <span>{{btn.label}}</span>
+          </button>
+        </div>
+      </div>
+
+    </aside>
+
+    
+    <!-- LEFT PANEL: TEAM CONFIG (collapsible) -->
+    <aside *ngIf="activeTeam" class="team-sidebar" [class.collapsed]="teamSidebarCollapsed">
+      <!-- Toggle button — daralt/aç -->
+      <button class="team-sidebar-toggle" (click)="toggleTeamSidebar()"
+              [title]="teamSidebarCollapsed ? 'Paneli aç' : 'Paneli daralt'">
+        <span>{{ teamSidebarCollapsed ? '›' : '‹' }}</span>
+      </button>
+
+      <!-- Sadece daraltıldığında: dikey ikon şeridi -->
+      <div *ngIf="teamSidebarCollapsed" class="team-sidebar-rail">
+        <div class="rail-icon" [title]="activeTeam.name">🛡️</div>
+        <div class="rail-divider"></div>
+        <div *ngFor="let id of activeTeam.robotIds"
+             class="rail-icon rail-member"
+             (click)="onSelectFleetRobot(id)"
+             [class.active]="selectedFleetRobotId === id"
+             [title]="getRobotName(id) + ' — ' + (getTeamMember(id)?.status || 'offline')">
+          <span>{{ getTypeIcon(getTeamMember(id)?.config?.type || 'dog') }}</span>
+          <span class="rail-status-dot" [ngClass]="getTeamMember(id)?.status || 'offline'"></span>
+        </div>
+      </div>
+
+      <!-- Açık görünüm -->
+      <div *ngIf="!teamSidebarCollapsed" class="team-sidebar-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <div style="font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+            <span>🛡️</span><span>{{activeTeam.name}}</span>
+          </div>
+          <button class="btn-danger" style="padding: 6px 12px; font-size: 11px;" (click)="deleteTeam(activeTeam.id)">Sil</button>
+        </div>
+
+        <!-- Üyeler + bağlantı durumu -->
+        <div class="glass-panel" style="padding: 14px;">
+          <div class="section-label">Takım Üyeleri ({{activeTeam.robotIds.length}})</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <ng-container *ngFor="let id of activeTeam.robotIds">
+              <button class="team-member-row"
+                      [class.selected]="selectedFleetRobotId === id"
+                      (click)="onSelectFleetRobot(id)">
+                <span class="team-member-icon">{{ getTypeIcon(getTeamMember(id)?.config?.type || 'dog') }}</span>
+                <span class="team-member-name">{{ getRobotName(id) }}</span>
+                <span class="team-member-status">
+                  <span class="status-dot" [ngClass]="getTeamMember(id)?.status || 'offline'"></span>
+                  <span class="team-member-status-label">
+                    {{ getTeamMember(id)?.status === 'online' ? 'Bağlı'
+                       : getTeamMember(id)?.status === 'connecting' ? 'Bağlanıyor'
+                       : 'Bağlı Değil' }}
+                  </span>
+                </span>
+              </button>
+            </ng-container>
+          </div>
+
+          <!-- Toplu bağlan/kes -->
+          <div style="display: flex; gap: 6px; margin-top: 10px;">
+            <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px;"
+                    (click)="connectActive()" [disabled]="!activeTeam">
+              Hepsini Bağla
+            </button>
+            <button class="btn-ghost" style="flex: 1; padding: 8px; font-size: 11px;"
+                    (click)="disconnectActive()" [disabled]="!activeTeam">
+              Hepsini Kes
+            </button>
+          </div>
+        </div>
+
+        <!-- Komut Hedefi -->
+        <div class="glass-panel" style="padding: 14px;">
+          <div class="section-label">🎯 Komut Hedefi</div>
+          <div style="font-size: 12px; margin-bottom: 8px;">
+            <span *ngIf="selectedFleetRobotId" style="color: var(--warn); font-weight: 700;">
+              Bireysel: {{ getRobotName(selectedFleetRobotId) }}
+            </span>
+            <span *ngIf="!selectedFleetRobotId" style="color: var(--success); font-weight: 700;">
+              Tüm Takım (Broadcast)
+            </span>
+          </div>
+          <button class="btn-ghost" style="width: 100%; padding: 8px;"
+                  *ngIf="selectedFleetRobotId" (click)="clearFleetSelection()">
+            ↺ Tüm takıma geç
+          </button>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 6px;">
+            Local Map'te bir robota tıklayarak bireysel kontrole geçebilirsiniz.
+          </div>
+        </div>
+
+        <!-- Speed & Steps -->
+        <div class="glass-panel" style="padding: 14px;">
+          <div class="section-label">⚡ Ortak Hız & Adım</div>
+          <div style="margin-bottom: 4px; font-size: 11px; color: var(--text-muted);">Adım Sayısı</div>
+          <div class="slider-row">
+            <input type="range" min="1" max="20" [value]="steps" (input)="setSteps($event)" />
+            <span class="slider-val">{{steps}}</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <!-- CENTER PANEL: Display & Control -->
+    <main style="display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 16px; padding: 16px; position: relative; overflow-y: auto;">
+      
+      <!-- Camera Display -->
+      <div *ngIf="activeRobot && activeRobot.config.modules?.includes('camera')" class="camera-container glass-panel">
+         <div class="camera-overlay" *ngIf="!activeRobot?.config?.camIp">Kamera IP'si girilmedi</div>
+         
+         <ng-container *ngIf="activeRobot?.config?.camIp">
+           <img id="active-cam-feed"
+                [src]="'http://' + activeRobot?.config?.camIp + ':81/stream?t=' + camTimestamp" 
+                class="camera-feed"
+                crossOrigin="anonymous"
+                alt="Kamera Akışı Bekleniyor..." />
+           
+           <canvas id="active-ai-canvas" class="ai-canvas"></canvas>
+
+           <button class="ai-toggle-btn" [class.active]="aiEnabled" (click)="toggleAI()" [disabled]="isAiLoading">
+             🤖 {{ isAiLoading ? 'Model Yükleniyor...' : (aiEnabled ? 'YZ Açık (' + aiFps + ' FPS)' : 'Yapay Zeka (Kapalı)') }}
+           </button>
+
+           <button class="cam-refresh-btn" (click)="refreshCamera()">
+             🔄 Yenile
+           </button>
+         </ng-container>
+      </div>
+
+      <!-- 3D Digital Twin -->
+      <div class="glass-panel twin-panel" [class.twin-panel-fleet]="!!activeTeam">
+        <app-digital-twin *ngIf="activeRobot" [robotState]="activeRobot.state" [robotType]="activeRobot.config.type"></app-digital-twin>
+        <app-digital-twin *ngIf="activeTeam"
+          [fleetRobots]="teamRobots"
+          [fleetSpacing]="activeTeam.spacing"
+          [selectedFleetRobotId]="selectedFleetRobotId"
+          (selectFleetRobot)="onSelectFleetRobot($event)"
+          (fleetRobotMove)="onFleetRobotMove($event)">
+        </app-digital-twin>
+      </div>
+
+      <div class="glass-panel" style="padding: 24px;" *ngIf="!activeTeam">
+        <app-movement-pad
+          [steps]="steps"
+          [disabled]="activeRobot ? activeRobot.status !== 'online' : false"
+          [avoidActive]="!!activeRobot?.state?.['avoidActive']"
+          [stabilizeActive]="!!activeRobot?.state?.['stabilizeActive']"
+          (sendCommand)="sendCommand($event.cmd, $event.value)">
+        </app-movement-pad>
+      </div>
+
+      <div *ngIf="!activeTeam" style="display: flex; gap: 12px; font-size: 10px; color: var(--text-muted); flex-wrap: wrap; justify-content: center;">
+        <span>↑ İleri</span><span>↓ Geri</span><span>← Sol</span><span>→ Sağ</span><span>Space Dur</span>
+      </div>
+
+    </main>
+
+    <!-- RIGHT PANEL: Emotions & Logs -->
+    <aside *ngIf="activeRobot" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; border-left: 1px solid var(--border); overflow: hidden;">
+      
+      <div class="glass-panel" style="padding: 16px; flex-shrink: 0;" *ngIf="activeRobot.config.type === 'dog'">
+        <app-emotion-panel
+          [activeEmotion]="activeRobot.state.emotionName || 'neutral'"
+          [disabled]="activeRobot ? activeRobot.status !== 'online' : false"
+          (emotionSelect)="sendCommand('emotion', $event)">
+        </app-emotion-panel>
+      </div>
+
+      <div class="glass-panel" style="padding: 0; flex: 1; overflow: hidden;">
+        <app-log-console 
+          [logs]="activeRobot.logs" 
+          (clearLogs)="activeRobot.clearLogs()">
+        </app-log-console>
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>
+
+<!-- ROBOT BUILDER WIZARD MODAL -->
+<div class="modal-overlay" *ngIf="showAddModal">
+  <div class="modal glass-panel" style="max-width: 600px;">
+    
+    <!-- Wizard Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+      <div>
+        <h2 style="margin: 0; font-size: 18px; color: var(--text-primary);">{{ editingRobotId ? 'Robotu Düzenle' : '🤖 Robot Oluşturucu (Builder)' }}</h2>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" *ngIf="!editingRobotId">
+          Adım {{builderStep}} / 3: {{ builderStep === 1 ? 'Şasi Seçimi' : builderStep === 2 ? 'Sensör & Modüller' : 'Ağ & İsimlendirme' }}
+        </div>
+      </div>
+      <button class="btn-ghost" style="padding: 0; font-size: 20px;" (click)="showAddModal=false">✕</button>
+    </div>
+
+    <!-- Step 1: Chassis (Mekanizma) -->
+    <div *ngIf="builderStep === 1" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      <div class="module-card" [class.selected]="formData.type === 'dog'" (click)="formData.type = 'dog'">
+        <div style="font-size: 32px; margin-bottom: 8px;">🐕</div>
+        <div style="font-weight: 600;">Robot Köpek</div>
+        <div style="font-size: 10px; color: var(--text-muted);">4 bacaklı dinamik şasi</div>
+      </div>
+      <div class="module-card" [class.selected]="formData.type === 'tank'" (click)="formData.type = 'tank'">
+        <div style="font-size: 32px; margin-bottom: 8px;">🚜</div>
+        <div style="font-weight: 600;">Mini Tank</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Paletli arazi şasisi</div>
+      </div>
+      <div class="module-card" [class.selected]="formData.type === 'omni3'" (click)="formData.type = 'omni3'">
+        <div style="font-size: 32px; margin-bottom: 8px;">🛸</div>
+        <div style="font-weight: 600;">3-Teker Omni</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Çok yönlü mobil platform</div>
+      </div>
+      <div class="module-card" [class.selected]="formData.type === 'omni4'" (click)="formData.type = 'omni4'">
+        <div style="font-size: 32px; margin-bottom: 8px;">🚙</div>
+        <div style="font-weight: 600;">4-Teker Omni</div>
+        <div style="font-size: 10px; color: var(--text-muted);">Mecanum tekerlekli platform</div>
+      </div>
+    </div>
+
+    <!-- Step 2: Modules & Sensors -->
+    <div *ngIf="builderStep === 2">
+      <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">Robotunuza eklemek istediğiniz donanımları seçin:</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div *ngFor="let mod of availableModules" 
+             class="module-card" 
+             [class.selected]="formData.modules?.includes(mod.id)"
+             (click)="toggleModule(mod.id)">
+          <div style="font-size: 24px; margin-bottom: 4px;">{{mod.icon}}</div>
+          <div style="font-weight: 600; font-size: 13px;">{{mod.name}}</div>
+          <div style="font-size: 10px; color: var(--text-muted);">{{mod.desc}}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Network & Naming -->
+    <div *ngIf="builderStep === 3" style="display: flex; flex-direction: column; gap: 16px;">
+      <div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">Robot İsmi</div>
+        <input type="text" [(ngModel)]="formData.name" placeholder="Örn: Rex" />
+      </div>
+
+      <div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">ESP32 IP Adresi (Kontrol İçin)</div>
+        <input type="text" [(ngModel)]="formData.ip" placeholder="192.168.1.XXX" />
+      </div>
+
+      <div *ngIf="formData.modules?.includes('camera')">
+        <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">ESP32-CAM IP Adresi (Video İçin)</div>
+        <input type="text" [(ngModel)]="formData.camIp" placeholder="192.168.1.YYY" />
+      </div>
+
+      <!-- Ağ Tarayıcı -->
+      <div style="background: var(--bg-overlay); padding: 12px; border-radius: var(--radius-sm); border: 1px dashed var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 11px; color: var(--text-muted);">Ağdaki Cihazları Bul</span>
+          <button class="btn-ghost" style="padding: 4px 8px; font-size: 10px;" (click)="scanNetwork()" [disabled]="isScanning">
+            {{ isScanning ? 'Aranıyor...' : '🔍 Otomatik Tara' }}
+          </button>
+        </div>
+        
+        <div *ngIf="foundIPs.length > 0" style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+          <div style="font-size: 10px; color: var(--success);">{{foundIPs.length}} Cihaz Bulundu:</div>
+          <div *ngFor="let ip of foundIPs" style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-raised); padding: 6px; border-radius: 4px;">
+            <span style="font-size: 12px; font-family: var(--font-mono);">{{ip}}</span>
+            <div style="display: flex; gap: 4px;">
+              <button class="btn-ghost" style="font-size: 9px; padding: 2px 6px;" (click)="useScannedIp(ip, 'ip')">Kontrol IP Yap</button>
+              <button class="btn-ghost" *ngIf="formData.modules?.includes('camera')" style="font-size: 9px; padding: 2px 6px;" (click)="useScannedIp(ip, 'camIp')">Kamera IP Yap</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wizard Controls -->
+    <div style="display: flex; justify-content: space-between; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px;">
+      <div>
+        <button *ngIf="editingRobotId" class="btn-danger" style="width: auto; padding: 10px 16px;" (click)="deleteRobot(editingRobotId)">Sil</button>
+      </div>
+      <div style="display: flex; gap: 12px;">
+        <button class="btn-ghost" *ngIf="builderStep > 1 && !editingRobotId" (click)="prevStep()">Geri</button>
+        <button class="btn-primary" *ngIf="builderStep < 3 && !editingRobotId" (click)="nextStep()">İleri</button>
+        <button class="btn-primary" *ngIf="builderStep === 3" (click)="saveRobot()">Kaydet & Bitir</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TEAM BUILDER MODAL -->
+  <div class="modal-overlay" *ngIf="showTeamModal">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2 style="font-size: 20px; font-weight: 700;">Takım Oluştur</h2>
+        <button class="close-btn" (click)="showTeamModal = false">✕</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <label class="form-group">
+          <span>Takım Adı</span>
+          <input type="text" [(ngModel)]="teamFormData.name" placeholder="Örn: Alfa Timi">
+        </label>
+        
+        <div class="form-group">
+          <span>Takımdaki Robotlar</span>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <label *ngFor="let r of robots" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; border: 1px solid var(--border); border-radius: 6px;" [style.border-color]="teamFormData.robotIds.includes(r.config.id) ? 'var(--accent)' : ''">
+              <input type="checkbox" 
+                     [checked]="teamFormData.robotIds.includes(r.config.id)" 
+                     (change)="toggleTeamRobot(r.config.id)" 
+                     style="width: 16px; height: 16px;">
+              <span>{{r.config.name}}</span>
+            </label>
+          </div>
+        </div>
+        
+        <label class="form-group">
+          <span>Robotlar Arası Mesafe (Metre)</span>
+          <input type="range" min="0.5" max="3" step="0.1" [(ngModel)]="teamFormData.spacing">
+          <div style="font-size: 11px; text-align: right; color: var(--accent);">{{teamFormData.spacing}}m</div>
+        </label>
+
+        <button class="btn-primary" style="margin-top: 16px;" (click)="saveTeam()" [disabled]="teamFormData.name.length < 2 || teamFormData.robotIds.length < 1">Takımı Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+</div>

@@ -1,0 +1,15 @@
+<div>
+  <div class="section-label">💭 Duygu Durumu</div>
+  <div class="emotion-grid">
+    <button *ngFor="let e of emotions"
+      class="emotion-btn"
+      [class.active]="activeEmotion === e.id"
+      (click)="handleEmotion(e.id)"
+      [disabled]="disabled"
+      [style.opacity]="disabled ? 0.5 : 1"
+      [title]="e.label">
+      <span class="emotion-emoji">{{e.emoji}}</span>
+      <span class="emotion-label">{{e.label}}</span>
+    </button>
+  </div>
+</div>

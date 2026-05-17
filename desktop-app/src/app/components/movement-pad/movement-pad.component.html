@@ -1,0 +1,55 @@
+<div style="display: flex; flex-direction: column; gap: 16px; align-items: center;">
+  <div class="section-label" style="width: 100%;">🕹️ Hareket</div>
+  
+  <div class="dpad-grid">
+    <ng-container *ngFor="let dir of directions; let i = index">
+      <div *ngIf="!dir.cmd" [attr.data-key]="i"></div>
+      
+      <button *ngIf="dir.cmd"
+        class="dpad-btn"
+        [class.stop]="dir.cmd === 'stop'"
+        [class.active]="activeCmd === dir.cmd"
+        (mousedown)="startHold(dir.cmd)"
+        (mouseup)="stopHold()"
+        (mouseleave)="stopHold()"
+        (touchstart)="$event.preventDefault(); startHold(dir.cmd)"
+        (touchend)="stopHold()"
+        [disabled]="disabled"
+        [style.opacity]="disabled ? 0.4 : 1">
+        
+        <span class="dpad-icon">{{dir.icon}}</span>
+        <span class="dpad-label">{{dir.label}}</span>
+      </button>
+    </ng-container>
+  </div>
+
+  <!-- Engelden Kaçış -->
+  <button
+    class="dpad-btn"
+    [class.stop]="avoidActive"
+    (click)="toggleAvoid()"
+    [disabled]="disabled"
+    [style.opacity]="disabled ? 0.4 : 1"
+    style="width: 100%; max-width: 260px; height: auto; padding: 10px; display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center;"
+    [title]="avoidActive ? 'Otonom modu durdur' : 'ToF sensörüyle engelden kaçarak hareket et'">
+    <span style="font-size: 18px;">{{ avoidActive ? '🛑' : '🚧' }}</span>
+    <span style="font-size: 12px; font-weight: 600;">
+      {{ avoidActive ? 'Otonom Modu Durdur' : 'Engelden Kaç' }}
+    </span>
+  </button>
+
+  <!-- Gyro Stabilize (Heading Lock) -->
+  <button
+    class="dpad-btn"
+    [class.stop]="stabilizeActive"
+    (click)="toggleStabilize()"
+    [disabled]="disabled"
+    [style.opacity]="disabled ? 0.4 : 1"
+    style="width: 100%; max-width: 260px; height: auto; padding: 10px; display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center;"
+    [title]="stabilizeActive ? 'Stabilizasyonu kapat' : 'Robot altındaki platform dönse bile sabit yöne baksın'">
+    <span style="font-size: 18px;">{{ stabilizeActive ? '🛑' : '🧭' }}</span>
+    <span style="font-size: 12px; font-weight: 600;">
+      {{ stabilizeActive ? 'Stabilize KAPALI' : 'Gyro Stabilize' }}
+    </span>
+  </button>
+</div>

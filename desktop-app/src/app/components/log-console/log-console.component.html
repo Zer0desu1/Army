@@ -1,0 +1,30 @@
+<div class="log-console">
+  <div class="log-header">
+    <span class="log-title">
+      <span class="log-title-dot"></span>
+      Konsol
+    </span>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span style="font-size: 10px; color: var(--text-muted);">
+        {{logs.length}} kayıt
+      </span>
+      <button class="btn-ghost" (click)="copyLogs()" title="Logları Kopyala">📋 Kopyala</button>
+      <button class="btn-ghost" (click)="clearLogs.emit()">Temizle</button>
+    </div>
+  </div>
+  <div class="log-body">
+    <div *ngIf="logs.length === 0" style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 11px;">
+      Henüz mesaj yok
+    </div>
+    
+    <div *ngFor="let entry of logs" class="log-entry">
+      <span class="log-ts">{{entry.ts}}</span>
+      <span [style.color]="getColor(entry.type)" style="flex-shrink: 0; width: 14px;">
+        {{getPrefix(entry.type)}}
+      </span>
+      <span class="log-msg" [style.color]="entry.type === 'info' ? 'var(--text-secondary)' : getColor(entry.type)">
+        {{entry.msg}}
+      </span>
+    </div>
+  </div>
+</div>

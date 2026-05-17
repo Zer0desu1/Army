@@ -1,0 +1,16 @@
+<div class="dog-display">
+  <div
+    class="dog-emoji"
+    [ngClass]="animClass"
+    [style.filter]="'drop-shadow(0 0 24px ' + emotionObj.color + '80)'"
+    [title]="emotionObj.label">
+    🐕
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 20px; padding: 4px 14px;">
+    <span style="font-size: 16px;">{{emotionObj.emoji}}</span>
+    <span class="dog-status-text">{{emotionObj.label}}</span>
+  </div>
+  <span class="dog-status-text" style="color: var(--text-muted); font-size: 11px;">
+    {{statusText}}
+  </span>
+</div>

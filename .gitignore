@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+**/dist/
+**/build/
+
+# Angular cache
+.angular/
+**/.angular/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Electron
+release/
+**/release/
+*.exe
+*.dmg
+*.AppImage
+
+# Arduino build artifacts
+*.bin
+build*/
+.pio/
+.pioenvs/
