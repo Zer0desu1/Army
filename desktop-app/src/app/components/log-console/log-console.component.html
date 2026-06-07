@@ -16,7 +16,7 @@
     <div *ngIf="logs.length === 0" style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 11px;">
       Henüz mesaj yok
     </div>
-    
+
     <div *ngFor="let entry of logs" class="log-entry">
       <span class="log-ts">{{entry.ts}}</span>
       <span [style.color]="getColor(entry.type)" style="flex-shrink: 0; width: 14px;">

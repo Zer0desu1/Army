@@ -12,17 +12,19 @@
 const char* SSID     = "WIFI_ADI";
 const char* PASSWORD = "WIFI_SIFRE";
 
-const char* AP_SSID  = "Cyber";
-const char* AP_PASS  = "cyber1234";
+const char* AP_SSID  = "Quad";
+const char* AP_PASS  = "quad1234";
 
 Preferences prefs;
 
 #define M1_IN1 32
 #define M1_IN2 33
-#define M2_IN1 25
-#define M2_IN2 26
-#define M3_IN1 27
-#define M3_IN2 14
+#define M2_IN1 5
+#define M2_IN2 18
+#define M3_IN1 25
+#define M3_IN2 26
+#define M4_IN1 19
+#define M4_IN2 21
 
 #define PWM_FREQ  20000
 #define PWM_RES   8
@@ -41,6 +43,8 @@ float REV_BOOST = 1.0f;
     if (pin == M2_IN2) return 3;
     if (pin == M3_IN1) return 4;
     if (pin == M3_IN2) return 5;
+    if (pin == M4_IN1) return 6;
+    if (pin == M4_IN2) return 7;
     return -1;
   }
   static inline void pwmSetup(int pin) {
@@ -55,12 +59,46 @@ float REV_BOOST = 1.0f;
   }
 #endif
 
-#define I2C_SDA 21
-#define I2C_SCL 22
+#define I2C_SDA 22
+#define I2C_SCL 23
+
+#define SERVO_PIN     4
+#define SERVO_DEFAULT 90
+#define SERVO_FREQ    50
+#define SERVO_RES     16
+#define SERVO_MIN_US  500
+#define SERVO_MAX_US  2400
+#define SERVO_CH      8
+int servoAngle = 0;
+
+void servoWrite(int angle) {
+  angle = constrain(angle, 0, 180);
+  long us = SERVO_MIN_US + (long)(SERVO_MAX_US - SERVO_MIN_US) * angle / 180;
+  uint32_t maxDuty = (1UL << SERVO_RES) - 1;
+  uint32_t duty = (uint32_t)((uint64_t)us * maxDuty / 20000);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(SERVO_PIN, duty);
+#else
+  ledcWrite(SERVO_CH, duty);
+#endif
+}
+
+void servoSetup() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(SERVO_PIN, SERVO_FREQ, SERVO_RES);
+#else
+  ledcSetup(SERVO_CH, SERVO_FREQ, SERVO_RES);
+  ledcAttachPin(SERVO_PIN, SERVO_CH);
+#endif
+}
 
 #define UART_RX2 16
 #define UART_TX2 17
 #define UART_BAUD 9600
+
+bool convoyActive = false;
+
+int  convoyCyberSpeed = 100;
 
 Adafruit_VL53L0X  tof;
 Adafruit_MPU6050  imu;
@@ -79,10 +117,9 @@ bool fusionReady = false;
 WebSocketsServer webSocket = WebSocketsServer(81);
 
 struct RobotState {
-  int   speed     = 100;
+  int   speed     = 75;
   bool  isMoving  = false;
   unsigned long lastAction = 0;
-
   uint16_t distanceMm = 0;
   float    ax = 0, ay = 0, az = 0;
   float    gx = 0, gy = 0, gz = 0;
@@ -124,6 +161,7 @@ void smartDelay(unsigned long ms) {
 #define delay smartDelay
 
 void driveMotor(int pinIn1, int pinIn2, int v) {
+
   v = constrain(v, -255, 255);
   if (v > 0) {
     pwmWrite(pinIn1, v);
@@ -139,29 +177,29 @@ void driveMotor(int pinIn1, int pinIn2, int v) {
   }
 }
 
+void driveWheels(int fl, int fr, int rl, int rr) {
+  driveMotor(M1_IN1, M1_IN2, -rl);
+  driveMotor(M2_IN1, M2_IN2, -fr);
+  driveMotor(M3_IN1, M3_IN2,  fl);
+  driveMotor(M4_IN1, M4_IN2,  rr);
+  robot.isMoving = (fl || fr || rl || rr);
+}
+
 void omniDrive(float vx, float vy, float w) {
 
-  const float a1 = M_PI / 2.0f;
-  const float a2 = 11.0f * M_PI / 6.0f;
-  const float a3 = 7.0f  * M_PI / 6.0f;
+  float vFL = vy - vx + w;
+  float vFR = vy + vx + w;
+  float vRL = vy - vx - w;
+  float vRR = vy + vx - w;
 
-  float v1 = -vx * sinf(a1) + vy * cosf(a1) + w;
-  float v2 = -vx * sinf(a2) + vy * cosf(a2) + w;
-  float v3 = -vx * sinf(a3) + vy * cosf(a3) + w;
-
-  float maxv = fmaxf(fmaxf(fabsf(v1), fabsf(v2)), fmaxf(fabsf(v3), 1.0f));
-  v1 /= maxv;  v2 /= maxv;  v3 /= maxv;
+  float maxv = fmaxf(fmaxf(fabsf(vFL), fabsf(vFR)),
+                     fmaxf(fabsf(vRL), fabsf(vRR)));
+  if (maxv < 1.0f) maxv = 1.0f;
+  vFL /= maxv;  vFR /= maxv;  vRL /= maxv;  vRR /= maxv;
 
   float scale = robot.speed / 100.0f;
-  int pwm1 = (int)(v1 * 255 * scale);
-  int pwm2 = (int)(v2 * 255 * scale);
-  int pwm3 = (int)(v3 * 255 * scale);
-
-  driveMotor(M1_IN1, M1_IN2, pwm1);
-  driveMotor(M2_IN1, M2_IN2, pwm2);
-  driveMotor(M3_IN1, M3_IN2, pwm3);
-
-  robot.isMoving = (pwm1 || pwm2 || pwm3);
+  driveWheels((int)(vFL * 255 * scale), (int)(vFR * 255 * scale),
+              (int)(vRL * 255 * scale), (int)(vRR * 255 * scale));
 }
 
 void stopAll() {
@@ -173,10 +211,10 @@ const int STEP_MS = 250;
 
 float HH_KP = 0.030f;
 float HH_KI = 0.0010f;
-const float HH_DEADZONE   = 3.0f;
-const float HH_W_MAX      = 0.45f;
-const float HH_I_MAX      = 0.30f;
-const int   HH_TICK_MS    = 20;
+const float HH_DEADZONE = 3.0f;
+const float HH_W_MAX    = 0.45f;
+const float HH_I_MAX    = 0.30f;
+const int   HH_TICK_MS  = 20;
 
 void calibrateGyro(int samples = 300) {
   if (!hasImu) return;
@@ -214,20 +252,16 @@ float angleDiff(float target, float current) {
 }
 
 float tiltCompensatedHeading() {
-
   float roll  = atan2f(robot.ay, robot.az);
   float pitch = atan2f(-robot.ax,
                        sqrtf(robot.ay * robot.ay + robot.az * robot.az));
-
   float mx = (float)compass.getX();
   float my = (float)compass.getY();
   float mz = (float)compass.getZ();
-
   float cosR = cosf(roll),  sinR = sinf(roll);
   float cosP = cosf(pitch), sinP = sinf(pitch);
   float Xh = mx * cosP + mz * sinP;
   float Yh = mx * sinR * sinP + my * cosR - mz * sinR * cosP;
-
   float headingRad = atan2f(-Yh, Xh);
   float headingDeg = headingRad * 180.0f / (float)M_PI;
   if (headingDeg < 0) headingDeg += 360.0f;
@@ -236,7 +270,6 @@ float tiltCompensatedHeading() {
 
 void updateFusedYaw() {
   if (!hasImu && !hasCompass) return;
-
   unsigned long now = millis();
   if (lastFusionT == 0) { lastFusionT = now; return; }
   float dt = (now - lastFusionT) / 1000.0f;
@@ -262,20 +295,20 @@ void updateFusedYaw() {
   }
 
   if (haveMag) {
-
     float delta = angleDiff(magYaw, gyroYaw);
     fusedYaw = gyroYaw + (1.0f - FUSION_ALPHA) * delta;
   } else {
     fusedYaw = gyroYaw;
   }
 
-  while (fusedYaw < 0)      fusedYaw += 360.0f;
+  while (fusedYaw < 0)       fusedYaw += 360.0f;
   while (fusedYaw >= 360.0f) fusedYaw -= 360.0f;
 }
 
+void readSensors();
+
 void driveStraight(float vy, unsigned long totalMs) {
   if (!hasCompass && !hasImu) {
-
     omniDrive(0, vy, 0);
     delay(totalMs);
     stopAll();
@@ -310,7 +343,6 @@ void driveStraight(float vy, unsigned long totalMs) {
     float w = 0.0f;
     if (fabsf(err) > HH_DEADZONE) {
       iAccum += err * dt;
-
       float iLimit = (Ki > 1e-6f) ? (HH_I_MAX / Ki) : 0.0f;
       if (iAccum >  iLimit) iAccum =  iLimit;
       if (iAccum < -iLimit) iAccum = -iLimit;
@@ -319,7 +351,6 @@ void driveStraight(float vy, unsigned long totalMs) {
       if (w >  HH_W_MAX) w =  HH_W_MAX;
       if (w < -HH_W_MAX) w = -HH_W_MAX;
     } else {
-
       iAccum *= 0.95f;
     }
 
@@ -330,65 +361,81 @@ void driveStraight(float vy, unsigned long totalMs) {
   stopAll();
 }
 
-void moveForward(int steps) {
-  driveStraight(1.0f, (unsigned long)steps * STEP_MS);
-}
-
-void moveBackward(int steps) {
-  driveStraight(-1.0f, (unsigned long)steps * STEP_MS);
-}
+void moveForward(int steps)  { driveStraight(+1.0f, (unsigned long)steps * STEP_MS); }
+void moveBackward(int steps) { driveStraight(-1.0f, (unsigned long)steps * STEP_MS); }
 
 void rotateLeft(int steps) {
-  for (int i = 0; i < steps; i++) {
-    omniDrive(0, 0, 1.0f);
-    delay(STEP_MS);
-  }
+  for (int i = 0; i < steps; i++) { omniDrive(0, 0, 1.0f);  delay(STEP_MS); }
   stopAll();
 }
-
 void rotateRight(int steps) {
-  for (int i = 0; i < steps; i++) {
-    omniDrive(0, 0, -1.0f);
-    delay(STEP_MS);
-  }
+  for (int i = 0; i < steps; i++) { omniDrive(0, 0, -1.0f); delay(STEP_MS); }
   stopAll();
 }
-
 void strafeLeft(int steps) {
-  for (int i = 0; i < steps; i++) {
-    omniDrive(-1.0f, 0, 0);
-    delay(STEP_MS);
-  }
+  for (int i = 0; i < steps; i++) { omniDrive(-1.0f, 0, 0); delay(STEP_MS); }
+  stopAll();
+}
+void strafeRight(int steps) {
+  for (int i = 0; i < steps; i++) { omniDrive(+1.0f, 0, 0); delay(STEP_MS); }
   stopAll();
 }
 
-void strafeRight(int steps) {
-  for (int i = 0; i < steps; i++) {
-    omniDrive(1.0f, 0, 0);
-    delay(STEP_MS);
-  }
+void motorTest() {
   stopAll();
+  struct { int in1, in2; const char* name; } M[4] = {
+    { M1_IN1, M1_IN2, "M1 (kod: FL)" },
+    { M2_IN1, M2_IN2, "M2 (kod: FR)" },
+    { M3_IN1, M3_IN2, "M3 (kod: RL)" },
+    { M4_IN1, M4_IN2, "M4 (kod: RR)" }
+  };
+  for (int i = 0; i < 4; i++) {
+    Serial.printf("🔧 TEST %d → %s (ham ileri)\n", i + 1, M[i].name);
+    String msg = String("{\"type\":\"motorTest\",\"step\":") + (i + 1) + ",\"motor\":\"" + M[i].name + "\"}";
+    webSocket.broadcastTXT(msg);
+    driveMotor(M[i].in1, M[i].in2, 160);
+    delay(1500);
+    driveMotor(M[i].in1, M[i].in2, 0);
+    delay(900);
+  }
+  Serial.println("✅ Motor testi bitti");
+  webSocket.broadcastTXT("{\"type\":\"motorTest\",\"step\":0}");
+}
+
+void kinTest() {
+  stopAll();
+  const int P = 200;
+  struct { int fl, fr, rl, rr; const char* name; } T[4] = {
+    { +P, +P, +P, +P, "A [+,+,+,+]" },
+    { +P, -P, +P, -P, "B [+,-,+,-]" },
+    { +P, +P, -P, -P, "C [+,+,-,-]" },
+    { +P, -P, -P, +P, "D [+,-,-,+]" }
+  };
+  for (int i = 0; i < 4; i++) {
+    Serial.printf("🧭 KIN %d → %s\n", i + 1, T[i].name);
+    String msg = String("{\"type\":\"kinTest\",\"step\":") + (i + 1) + ",\"pattern\":\"" + T[i].name + "\"}";
+    webSocket.broadcastTXT(msg);
+    driveWheels(T[i].fl, T[i].fr, T[i].rl, T[i].rr);
+    delay(1700);
+    driveWheels(0, 0, 0, 0);
+    delay(1100);
+  }
+  Serial.println("✅ Kinematik testi bitti");
+  webSocket.broadcastTXT("{\"type\":\"kinTest\",\"step\":0}");
 }
 
 void avoidanceTick() {
   if (!avoidActive) return;
-  if (!hasTof) {
-    Serial.println("⚠️ Avoid: ToF yok, mod kapatılıyor");
-    avoidActive = false;
-    stopAll();
-    return;
-  }
+  if (!hasTof) { avoidActive = false; stopAll(); return; }
 
   uint16_t d = robot.distanceMm;
   unsigned long now = millis();
   unsigned long phaseMs = now - avoidPhaseT0;
-
   bool blocked = (d > 0 && d < AVOID_SAFE_MM);
   bool clear   = (d == 0 || d > AVOID_CLEAR_MM);
 
   if (avoidPhase == AV_FORWARD) {
     if (blocked) {
-
       avoidTurnDir = -avoidTurnDir;
       avoidPhase   = AV_TURNING;
       avoidPhaseT0 = now;
@@ -396,22 +443,17 @@ void avoidanceTick() {
       Serial.printf("🚧 Engel %dmm → %s dön\n", d, avoidTurnDir > 0 ? "sola" : "sağa");
       return;
     }
-
     omniDrive(0, AVOID_FWD_SPEED, 0);
-  }
-  else {
-
+  } else {
     if (phaseMs > AVOID_TURN_MIN_MS && clear) {
       avoidPhase   = AV_FORWARD;
       avoidPhaseT0 = now;
       Serial.printf("✅ Açık (%dmm) → ileri\n", d);
       return;
     }
-
     if (phaseMs > AVOID_TURN_MAX_MS) {
       avoidTurnDir = -avoidTurnDir;
       avoidPhaseT0 = now;
-      Serial.println("⟳ Hâlâ engel, ters yönü dene");
     }
     omniDrive(0, 0, AVOID_TURN_RATE * avoidTurnDir);
   }
@@ -419,26 +461,19 @@ void avoidanceTick() {
 
 void stabilizeTick() {
   if (!stabilizeActive) return;
-  if (!hasImu && !hasCompass) {
-    Serial.println("⚠️ Stabilize: IMU/pusula yok, mod kapatılıyor");
-    stabilizeActive = false;
-    stopAll();
-    return;
-  }
+  if (!hasImu && !hasCompass) { stabilizeActive = false; stopAll(); return; }
 
   unsigned long now = millis();
   if (now - lastStabilizeTick < (unsigned long)STAB_TICK_MS) return;
   lastStabilizeTick = now;
 
   float err = angleDiff(fusedYaw, stabilizeTargetYaw);
-
   float w = 0.0f;
   if (fabsf(err) > STAB_DEADZONE) {
     w = STAB_KP * err;
     if (w >  STAB_W_MAX) w =  STAB_W_MAX;
     if (w < -STAB_W_MAX) w = -STAB_W_MAX;
   }
-
   omniDrive(0, 0, w);
 }
 
@@ -461,33 +496,29 @@ void readSensors() {
     tof.rangingTest(&m, false);
     robot.distanceMm = (m.RangeStatus != 4) ? m.RangeMilliMeter : 0;
   }
-
   if (hasImu) {
     sensors_event_t a, g, t;
     imu.getEvent(&a, &g, &t);
     robot.ax = a.acceleration.x;
     robot.ay = a.acceleration.y;
     robot.az = a.acceleration.z;
-
     robot.gx = g.gyro.x - gyroBiasX;
     robot.gy = g.gyro.y - gyroBiasY;
     robot.gz = g.gyro.z - gyroBiasZ;
     robot.temperature = t.temperature;
   }
-
   if (hasCompass) {
     compass.read();
     int h = compass.getAzimuth();
     if (h < 0) h += 360;
     robot.heading = h;
   }
-
   updateFusedYaw();
 }
 
 void sendStatus() {
   StaticJsonDocument<384> resp;
-  resp["type"]     = "cyber";
+  resp["type"]     = "quad";
   resp["speed"]    = robot.speed;
   resp["moving"]   = robot.isMoving;
   resp["distance"] = robot.distanceMm;
@@ -514,6 +545,13 @@ void processCommand(String msg) {
   robot.lastAction = millis();
   Serial.print("Komut: "); Serial.println(cmd);
 
+  if (convoyActive &&
+      (cmd == "walk" || cmd == "back" || cmd == "left" || cmd == "right" ||
+       cmd == "strafeLeft" || cmd == "strafeRight" || cmd == "drive" ||
+       cmd == "stop")) {
+    Serial2.println(msg);
+  }
+
   if (cmd == "walk") {
     moveForward(doc["value"] | 5);
   }
@@ -533,7 +571,6 @@ void processCommand(String msg) {
     strafeRight(doc["value"] | 3);
   }
   else if (cmd == "drive") {
-
     float vx = doc["vx"] | 0.0f;
     float vy = doc["vy"] | 0.0f;
     float w  = doc["w"]  | 0.0f;
@@ -545,7 +582,6 @@ void processCommand(String msg) {
     stopAll();
   }
   else if (cmd == "stabilize") {
-
     bool on = (doc["value"] | 0) != 0;
     if (on && !hasImu && !hasCompass) {
       webSocket.broadcastTXT("{\"type\":\"stabilize\",\"status\":\"error\",\"msg\":\"IMU/pusula yok\"}");
@@ -554,7 +590,6 @@ void processCommand(String msg) {
     if (on) {
       avoidActive = false;
       readSensors();
-
       unsigned long t0 = millis();
       while (!fusionReady && millis() - t0 < 500) { delay(20); readSensors(); }
       stabilizeTargetYaw = fusedYaw;
@@ -569,11 +604,9 @@ void processCommand(String msg) {
     ack["target"] = stabilizeTargetYaw;
     String out; serializeJson(ack, out);
     webSocket.broadcastTXT(out);
-    Serial.printf("🧭 Stabilize: %s (target=%.1f°)\n", on ? "ON" : "OFF", stabilizeTargetYaw);
     return;
   }
   else if (cmd == "avoid") {
-
     bool on = (doc["value"] | 0) != 0;
     if (on && !hasTof) {
       webSocket.broadcastTXT("{\"type\":\"avoid\",\"status\":\"error\",\"msg\":\"ToF yok\"}");
@@ -589,17 +622,80 @@ void processCommand(String msg) {
     ack["active"] = on;
     String out; serializeJson(ack, out);
     webSocket.broadcastTXT(out);
-    Serial.printf("🚧 Avoid: %s\n", on ? "ON" : "OFF");
     return;
   }
   else if (cmd == "greet") {
     greet();
   }
+  else if (cmd == "servo") {
+
+    int ang = doc["value"] | SERVO_DEFAULT;
+    servoAngle = constrain(ang, 0, 180);
+    servoWrite(servoAngle);
+    Serial.printf("🦾 Servo → %d°\n", servoAngle);
+    StaticJsonDocument<64> ack;
+    ack["type"]  = "servo";
+    ack["angle"] = servoAngle;
+    String out; serializeJson(ack, out);
+    webSocket.broadcastTXT(out);
+    return;
+  }
+  else if (cmd == "uart") {
+
+    String data = doc["value"] | "";
+    Serial2.println(data);
+    Serial.println("📡 UART2 gönderildi: " + data);
+    StaticJsonDocument<128> ack;
+    ack["type"] = "uart";
+    ack["sent"] = data;
+    String out; serializeJson(ack, out);
+    webSocket.broadcastTXT(out);
+    return;
+  }
+  else if (cmd == "convoy") {
+
+    convoyActive = (doc["value"] | 0) != 0;
+    if (convoyActive) {
+
+      Serial2.printf("{\"cmd\":\"speed\",\"value\":%d}\n", convoyCyberSpeed);
+    } else {
+      Serial2.println("{\"cmd\":\"stop\"}");
+    }
+    StaticJsonDocument<96> ack;
+    ack["type"]        = "convoy";
+    ack["active"]      = convoyActive;
+    ack["cyberSpeed"]  = convoyCyberSpeed;
+    String out; serializeJson(ack, out);
+    webSocket.broadcastTXT(out);
+    Serial.printf("🚚 Convoy: %s (cyber hız=%d)\n", convoyActive ? "ON" : "OFF", convoyCyberSpeed);
+    return;
+  }
+  else if (cmd == "convoySpeed") {
+
+    convoyCyberSpeed = constrain((int)(doc["value"] | 100), 10, 100);
+    if (convoyActive) {
+      Serial2.printf("{\"cmd\":\"speed\",\"value\":%d}\n", convoyCyberSpeed);
+    }
+    StaticJsonDocument<64> ack;
+    ack["type"]       = "convoySpeed";
+    ack["cyberSpeed"] = convoyCyberSpeed;
+    String out; serializeJson(ack, out);
+    webSocket.broadcastTXT(out);
+    Serial.printf("🚚 Cyber hız → %d\n", convoyCyberSpeed);
+    return;
+  }
+  else if (cmd == "motorTest") {
+    motorTest();
+    return;
+  }
+  else if (cmd == "kinTest") {
+    kinTest();
+    return;
+  }
   else if (cmd == "speed") {
     robot.speed = constrain((int)(doc["value"] | 50), 10, 100);
   }
   else if (cmd == "wifi") {
-
     String s = doc["ssid"] | "";
     String p = doc["pass"] | "";
     if (s.length() > 0) {
@@ -613,7 +709,6 @@ void processCommand(String msg) {
       ack["ssid"] = s;
       String out; serializeJson(ack, out);
       webSocket.broadcastTXT(out);
-      Serial.println("WiFi kaydedildi, 1 sn sonra restart...");
       delay(1000);
       ESP.restart();
     } else {
@@ -622,18 +717,15 @@ void processCommand(String msg) {
     return;
   }
   else if (cmd == "pid") {
-
     bool changed = false;
     if (doc.containsKey("kp")) { HH_KP = doc["kp"].as<float>(); changed = true; }
     if (doc.containsKey("ki")) { HH_KI = doc["ki"].as<float>(); changed = true; }
-
     if (changed) {
       prefs.begin("pid", false);
       prefs.putFloat("kp", HH_KP);
       prefs.putFloat("ki", HH_KI);
       prefs.end();
     }
-
     StaticJsonDocument<96> ack;
     ack["type"] = "pid";
     ack["kp"]   = HH_KP;
@@ -644,7 +736,6 @@ void processCommand(String msg) {
     return;
   }
   else if (cmd == "trim") {
-
     if (doc.containsKey("rev")) {
       REV_BOOST = doc["rev"].as<float>();
       if (REV_BOOST < 0.5f) REV_BOOST = 0.5f;
@@ -685,14 +776,12 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
     case WStype_CONNECTED: {
       Serial.printf("İstemci #%u bağlandı\n", num);
       sendStatus();
-
       StaticJsonDocument<96> ack;
       ack["type"] = "pid";
       ack["kp"]   = HH_KP;
       ack["ki"]   = HH_KI;
       String out; serializeJson(ack, out);
       webSocket.sendTXT(num, out);
-
       StaticJsonDocument<96> tack;
       tack["type"] = "trim";
       tack["rev"]  = REV_BOOST;
@@ -721,20 +810,20 @@ void setupMotor(int pin) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n🤖 CYBER başlatılıyor (3 omni tekerlek)...");
+  Serial.println("\n🤖 QUAD başlatılıyor (4 omni tekerlek, X-konfig)...");
 
-  setupMotor(M1_IN1);
-  setupMotor(M1_IN2);
-  setupMotor(M2_IN1);
-  setupMotor(M2_IN2);
-  setupMotor(M3_IN1);
-  setupMotor(M3_IN2);
+  setupMotor(M1_IN1); setupMotor(M1_IN2);
+  setupMotor(M2_IN1); setupMotor(M2_IN2);
+  setupMotor(M3_IN1); setupMotor(M3_IN2);
+  setupMotor(M4_IN1); setupMotor(M4_IN2);
   stopAll();
 
-  Serial2.setRxBufferSize(512);
+  servoSetup();
+  servoWrite(servoAngle);
+  Serial.printf("🦾 Servo hazır (GPIO%d), açı=%d°\n", SERVO_PIN, servoAngle);
+
   Serial2.begin(UART_BAUD, SERIAL_8N1, UART_RX2, UART_TX2);
-  Serial.printf("📡 UART2 hazır (RX2=%d, TX2=%d, %d baud) — quad komutları\n",
-                UART_RX2, UART_TX2, UART_BAUD);
+  Serial.printf("📡 UART2 hazır (RX2=%d, TX2=%d, %d baud)\n", UART_RX2, UART_TX2, UART_BAUD);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(400000);
@@ -759,7 +848,6 @@ void setup() {
   }
 
   compass.init();
-
   compass.read();
   hasCompass = true;
   Serial.println("✅ QMC5883L başlatıldı (0x0D)");
@@ -813,7 +901,6 @@ void setup() {
     Serial.println("\n⚠️ AP modu başlatılıyor (provizyon için)...");
     WiFi.softAP(AP_SSID, AP_PASS);
     Serial.println("AP IP: " + WiFi.softAPIP().toString());
-    Serial.println("→ App'ten ws://192.168.4.1:81 ile bağlanıp WiFi gönderin");
   }
 
   webSocket.begin();
@@ -825,25 +912,6 @@ void setup() {
 
 void loop() {
   webSocket.loop();
-
-  static String uartBuf;
-  while (Serial2.available()) {
-    char c = (char)Serial2.read();
-    if (c == '\n' || c == '\r') {
-      uartBuf.trim();
-      if (uartBuf.length() >= 2 && uartBuf[0] == '{' && uartBuf[uartBuf.length() - 1] == '}') {
-        Serial.println("📡 UART komut: " + uartBuf);
-        processCommand(uartBuf);
-      } else if (uartBuf.length()) {
-        Serial.println("⚠️ UART bozuk/yarım satır atlandı: " + uartBuf);
-      }
-      uartBuf = "";
-    } else {
-      uartBuf += c;
-      if (uartBuf.length() > 200) uartBuf = "";
-    }
-  }
-
   readSensors();
   avoidanceTick();
   stabilizeTick();

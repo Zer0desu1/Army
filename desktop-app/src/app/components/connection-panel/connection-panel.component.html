@@ -10,7 +10,7 @@
       (keydown.enter)="!isOnline && handleConnect()"
       style="flex: 1;"
     />
-    
+
     <button *ngIf="!isOnline && !isConnecting"
       class="btn-primary"
       style="width: auto; padding: 10px 16px; flex-shrink: 0;"
@@ -24,7 +24,7 @@
       (click)="disconnect.emit()">
       İptal
     </button>
-    
+
     <button *ngIf="isOnline"
       class="btn-danger"
       style="width: auto; padding: 10px 16px; flex-shrink: 0;"
@@ -41,7 +41,6 @@
     </span>
   </div>
 
-  <!-- WiFi Provizyon -->
   <div style="border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px;">
     <button
       class="btn-ghost"

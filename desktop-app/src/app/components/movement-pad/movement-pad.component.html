@@ -1,10 +1,10 @@
 <div style="display: flex; flex-direction: column; gap: 16px; align-items: center;">
   <div class="section-label" style="width: 100%;">🕹️ Hareket</div>
-  
+
   <div class="dpad-grid">
     <ng-container *ngFor="let dir of directions; let i = index">
       <div *ngIf="!dir.cmd" [attr.data-key]="i"></div>
-      
+
       <button *ngIf="dir.cmd"
         class="dpad-btn"
         [class.stop]="dir.cmd === 'stop'"
@@ -16,14 +16,92 @@
         (touchend)="stopHold()"
         [disabled]="disabled"
         [style.opacity]="disabled ? 0.4 : 1">
-        
+
         <span class="dpad-icon">{{dir.icon}}</span>
         <span class="dpad-label">{{dir.label}}</span>
       </button>
     </ng-container>
   </div>
 
-  <!-- Engelden Kaçış -->
+  <div *ngIf="robotType === 'omni4'" style="display: flex; gap: 8px; width: 100%; max-width: 260px;">
+    <button
+      class="dpad-btn"
+      [class.active]="activeCmd === 'left'"
+      (mousedown)="startHold('left')"
+      (mouseup)="stopHold()"
+      (mouseleave)="stopHold()"
+      (touchstart)="$event.preventDefault(); startHold('left')"
+      (touchend)="stopHold()"
+      [disabled]="disabled"
+      [style.opacity]="disabled ? 0.4 : 1"
+      style="flex: 1; height: auto; padding: 10px; display: flex; flex-direction: column; gap: 2px; align-items: center;"
+      title="Saat yönünün tersine dön (CCW)">
+      <span class="dpad-icon">↺</span>
+      <span class="dpad-label">Saat Tersi</span>
+    </button>
+    <button
+      class="dpad-btn"
+      [class.active]="activeCmd === 'right'"
+      (mousedown)="startHold('right')"
+      (mouseup)="stopHold()"
+      (mouseleave)="stopHold()"
+      (touchstart)="$event.preventDefault(); startHold('right')"
+      (touchend)="stopHold()"
+      [disabled]="disabled"
+      [style.opacity]="disabled ? 0.4 : 1"
+      style="flex: 1; height: auto; padding: 10px; display: flex; flex-direction: column; gap: 2px; align-items: center;"
+      title="Saat yönünde dön (CW)">
+      <span class="dpad-icon">↻</span>
+      <span class="dpad-label">Saat Yönü</span>
+    </button>
+  </div>
+
+  <button *ngIf="robotType === 'omni4'"
+    class="dpad-btn"
+    [class.stop]="servoOn"
+    (click)="toggleServo()"
+    [disabled]="disabled"
+    [style.opacity]="disabled ? 0.4 : 1"
+    style="width: 100%; max-width: 260px; height: auto; padding: 10px; display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center;"
+    [title]="servoOn ? 'Servoyu 0°a getir' : 'Servoyu 90°ye getir'">
+    <span style="font-size: 18px;">🦾</span>
+    <span style="font-size: 12px; font-weight: 600;">{{ servoOn ? 'Servo 0°' : 'Servo 90°' }}</span>
+  </button>
+
+  <button *ngIf="robotType === 'omni4'"
+    class="dpad-btn"
+    [class.stop]="convoyOn"
+    (click)="toggleConvoy()"
+    [disabled]="disabled"
+    [style.opacity]="disabled ? 0.4 : 1"
+    style="width: 100%; max-width: 260px; height: auto; padding: 10px; display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center;"
+    [title]="convoyOn ? 'Convoy modunu kapat (cyber durur)' : 'Quad hareketlerini UART ile cyber a ilet — beraber hareket'">
+    <span style="font-size: 18px;">{{ convoyOn ? '🛑' : '🚚' }}</span>
+    <span style="font-size: 12px; font-weight: 600;">{{ convoyOn ? 'Convoy KAPAT' : 'Convoy (Cyber Çek)' }}</span>
+  </button>
+
+  <div *ngIf="robotType === 'omni4'" style="width: 100%; max-width: 260px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
+    <span style="opacity: 0.8; white-space: nowrap;">🚚 Cyber Hız</span>
+    <input type="range" min="10" max="100" step="5"
+      [value]="convoyCyberSpeed"
+      (input)="setConvoyCyberSpeed(+$any($event.target).value)"
+      [disabled]="disabled"
+      style="flex: 1; min-width: 0;">
+    <span style="font-weight: 600; width: 28px; text-align: right;">{{ convoyCyberSpeed }}</span>
+  </div>
+
+  <div *ngIf="robotType === 'omni4'" style="display: flex; gap: 6px; width: 100%; max-width: 260px;">
+    <input type="text" [(ngModel)]="uartMsg" placeholder="Diğer robota mesaj..."
+      (keyup.enter)="sendUart()" [disabled]="disabled"
+      style="flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px;">
+    <button class="dpad-btn" (click)="sendUart()" [disabled]="disabled"
+      [style.opacity]="disabled ? 0.4 : 1"
+      style="height: auto; padding: 6px 12px; font-size: 12px; font-weight: 600;"
+      title="RX2/TX2 (Serial2) ile bağlı diğer robota gönder">
+      📡 Yolla
+    </button>
+  </div>
+
   <button
     class="dpad-btn"
     [class.stop]="avoidActive"
@@ -38,7 +116,6 @@
     </span>
   </button>
 
-  <!-- Gyro Stabilize (Heading Lock) -->
   <button
     class="dpad-btn"
     [class.stop]="stabilizeActive"
@@ -52,4 +129,39 @@
       {{ stabilizeActive ? 'Stabilize KAPALI' : 'Gyro Stabilize' }}
     </span>
   </button>
+
+  <button
+    class="dpad-btn"
+    (click)="togglePid()"
+    [disabled]="disabled"
+    [style.opacity]="disabled ? 0.4 : 1"
+    style="width: 100%; max-width: 260px; height: auto; padding: 8px; display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center;"
+    title="Düz gitme (heading-hold) PI kazançlarını canlı ayarla">
+    <span style="font-size: 16px;">⚙️</span>
+    <span style="font-size: 12px; font-weight: 600;">{{ pidShow ? 'PID Gizle' : 'PID Ayarla' }}</span>
+  </button>
+
+  <div *ngIf="pidShow" style="width: 100%; max-width: 260px; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: rgba(0,0,0,0.15); border-radius: 8px; font-size: 11px;">
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 6px; align-items: center;">
+      <span style="opacity: 0.7;">Kp</span>
+      <input type="number" step="0.001" [(ngModel)]="pidForm.kp" style="min-width: 0; padding: 3px 5px;">
+      <span style="opacity: 0.7;">Ki</span>
+      <input type="number" step="0.0001" [(ngModel)]="pidForm.ki" style="min-width: 0; padding: 3px 5px;">
+      <span style="opacity: 0.7;" title="Geri Yön PWM Boost — motor sürücü asimetri telafisi">rev</span>
+      <input type="number" step="0.05" min="0.5" max="2.0" [(ngModel)]="pidForm.rev" style="min-width: 0; padding: 3px 5px;">
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px;">
+      <button class="dpad-btn" (click)="applyPid()" [disabled]="disabled"
+        style="padding: 6px; font-size: 11px; font-weight: 600;">
+        PID Uygula
+      </button>
+      <button class="dpad-btn" (click)="applyTrim()" [disabled]="disabled"
+        style="padding: 6px; font-size: 11px; font-weight: 600;">
+        Trim Uygula
+      </button>
+    </div>
+    <div style="font-size: 9px; opacity: 0.55; line-height: 1.3;">
+      Kp/Ki: heading-hold PI. rev: 1.0=telafi yok, 1.3=%30 boost (geri yön zayıfsa).
+    </div>
+  </div>
 </div>

@@ -43,3 +43,7 @@ release/
 build*/
 .pio/
 .pioenvs/
+
+# Rapor / yardimci dosyalar (repoya dahil edilmez)
+*.docx
+generate_report.py

@@ -11,7 +11,7 @@ export interface RobotConfig {
   hasCamera: boolean;
   camIp?: string;
   modules: string[];
-  headingOffset?: number;   // Pusula ham açısı için "ileri" referansı (derece)
+  headingOffset?: number;
 }
 
 export interface Team {
@@ -27,15 +27,20 @@ export interface RobotState {
   walking: boolean;
   sitting: boolean;
   emotionName?: string;
-  // Dynamic sensor data
+
   temperature?: number;
-  distance?: number;          // cm (ultrasonic veya ToF→cm)
-  heading?: number;           // 0–359° (pusula)
-  ax?: number; ay?: number; az?: number;   // m/s² (MPU6050)
-  gx?: number; gy?: number; gz?: number;   // rad/s
-  avoidActive?: boolean;                   // Engelden kaçış otonom modu
-  stabilizeActive?: boolean;               // Gyro stabilize (heading lock)
-  stabilizeTarget?: number;                // Kilitlenen hedef yön (derece)
+  distance?: number;
+  heading?: number;
+  ax?: number; ay?: number; az?: number;
+  gx?: number; gy?: number; gz?: number;
+  avoidActive?: boolean;
+  stabilizeActive?: boolean;
+  stabilizeTarget?: number;
+
+  pidKp?: number;
+  pidKi?: number;
+
+  revBoost?: number;
 }
 
 export interface LogEntry {
@@ -47,7 +52,7 @@ export interface LogEntry {
 export class RobotInstance {
   config: RobotConfig;
   status: 'offline' | 'connecting' | 'online' = 'offline';
-  state: RobotState = { status: 'offline', emotionName: 'neutral', speed: 50, sitting: false, walking: false };
+  state: RobotState = { status: 'offline', emotionName: 'neutral', speed: 80, sitting: false, walking: false };
   logs: LogEntry[] = [];
   ws: WebSocket | null = null;
   private readonly WS_PORT = 81;
@@ -96,13 +101,13 @@ export class RobotInstance {
       this.ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          // Parse incoming state/sensor updates
+
           if (data.state) {
             this.state = { ...this.state, ...data.state };
           }
           if (data.temperature !== undefined) this.state.temperature = data.temperature;
           if (data.temp !== undefined)        this.state.temperature = data.temp;
-          // ESP32 ToF mm cinsinden yolluyor → cm'e çevir
+
           if (data.distance !== undefined) {
             this.state.distance = data.distance > 1000 ? Math.round(data.distance / 10) : data.distance;
           }
@@ -115,13 +120,24 @@ export class RobotInstance {
           }
           if (data.speed !== undefined)  this.state.speed  = data.speed;
           if (data.moving !== undefined) this.state.walking = data.moving;
-          // Engelden kaçış ACK ({type:"avoid", active:true/false})
+
           if (data.type === 'avoid' && data.active !== undefined) {
             this.state.avoidActive = !!data.active;
             this.addLog(data.active ? '🚧 Engelden kaçış AÇIK' : '🚧 Engelden kaçış KAPALI',
                         data.active ? 'success' : 'info');
           }
-          // Gyro stabilize ACK ({type:"stabilize", active, target})
+
+          if (data.type === 'pid') {
+            if (data.kp !== undefined) this.state.pidKp = data.kp;
+            if (data.ki !== undefined) this.state.pidKi = data.ki;
+            this.addLog(`⚙️ PID: Kp=${this.state.pidKp} Ki=${this.state.pidKi}`, 'recv');
+          }
+
+          if (data.type === 'trim') {
+            if (data.rev !== undefined) this.state.revBoost = data.rev;
+            this.addLog(`⚙️ Trim: rev=${this.state.revBoost}`, 'recv');
+          }
+
           if (data.type === 'stabilize' && data.active !== undefined) {
             this.state.stabilizeActive = !!data.active;
             if (data.target !== undefined) this.state.stabilizeTarget = data.target;
@@ -159,16 +175,12 @@ export class RobotInstance {
     return true;
   }
 
-  // Ham JSON gönder (cyber.ino "drive" gibi çok-alanlı komutlar için)
   sendRaw(obj: any): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(obj));
     return true;
   }
 
-  // ─── WiFi PROVİZYON ──────────────────────────────────────────
-  // Robotu AP modundayken (Cyber/192.168.4.1) bağla, sonra çağır.
-  // ESP32 kaydeder ve yeniden başlar; ev WiFi'na geçer.
   sendWifi(ssid: string, pass: string): boolean {
     if (!ssid || !ssid.trim()) {
       this.addLog('⚠ SSID boş olamaz', 'error');
@@ -183,16 +195,35 @@ export class RobotInstance {
     return ok;
   }
 
+  sendPid(values: { kp?: number; ki?: number }): boolean {
+    const payload: any = { cmd: 'pid' };
+    if (values.kp !== undefined) payload.kp = values.kp;
+    if (values.ki !== undefined) payload.ki = values.ki;
+    const ok = this.sendRaw(payload);
+    if (ok) {
+      const parts: string[] = [];
+      if (values.kp !== undefined) parts.push(`Kp=${values.kp}`);
+      if (values.ki !== undefined) parts.push(`Ki=${values.ki}`);
+      this.addLog(`⚙️ PID gönder → ${parts.join(' ')}`, 'send');
+    } else {
+      this.addLog('⚠ Bağlı değil — PID gönderilemedi', 'error');
+    }
+    return ok;
+  }
+
+  sendTrim(rev: number): boolean {
+    const ok = this.sendRaw({ cmd: 'trim', rev });
+    if (ok) this.addLog(`⚙️ Trim gönder → rev=${rev}`, 'send');
+    else    this.addLog('⚠ Bağlı değil — trim gönderilemedi', 'error');
+    return ok;
+  }
+
   sendWifiReset(): boolean {
     const ok = this.sendRaw({ cmd: 'wifiReset' });
     if (ok) this.addLog('🔄 WiFi sıfırlama gönderildi — robot AP moduna dönecek', 'send');
     return ok;
   }
 
-  // ─── PUSULA OFFSET KALİBRASYONU ──────────────────────────────
-  // Robotu istenen "ileri" yönüne çevir → bu butona bas → o anki ham
-  // pusula açısı offset olarak kaydedilir. Sonraki tüm okumalar
-  // bu noktaya göre normalize edilir (effectiveHeading = raw - offset).
   zeroHeading(): boolean {
     if (this.state.heading === undefined) {
       this.addLog('⚠ Pusula verisi yok — robot bağlı mı?', 'error');
@@ -203,7 +234,6 @@ export class RobotInstance {
     return true;
   }
 
-  // Offset uygulanmış efektif yön (-180..+180)
   effectiveHeading(): number | undefined {
     if (this.state.heading === undefined) return undefined;
     const offset = this.config.headingOffset ?? 0;
@@ -213,17 +243,14 @@ export class RobotInstance {
     return h;
   }
 
-  // ─── DÜZ-GİTME DÖNGÜSÜ (IMU/pusula tabanlı heading-hold) ─────
-  // Kullanıcı ileri/geri tuşuna basınca anlık yönü hedef kabul eder
-  // ve sapma oldukça w (dönüş hızı) ile telafi eder.
   private driveLoopId: any = null;
   private driveStopTimer: any = null;
   private setpointHeading: number | null = null;
-  private gyroIntegral = 0;     // pusula yoksa jiro ile entegre yön
+  private gyroIntegral = 0;
   private lastDriveT = 0;
 
   driveStraight(direction: 'forward' | 'back', steps: number, msPerStep = 250) {
-    // Önce varsa eski döngüyü durdur
+
     this.stopDrive(false);
 
     const hasCompass = this.config.modules?.includes('compass');
@@ -233,24 +260,20 @@ export class RobotInstance {
       return;
     }
 
-    // Hedef yön: SABİT 0° (manyetik kuzey = robotun "ileri" yönü)
     this.setpointHeading = 0;
     this.gyroIntegral    = 0;
     this.lastDriveT      = performance.now();
 
     const dir   = direction === 'forward' ? 1.0 : -1.0;
-    const Kp        = 0.018;   // sürüş sırasında düzeltme
-    const Kp_align  = 0.030;   // hizalama aşamasında daha sert
+    const Kp        = 0.018;
+    const Kp_align  = 0.030;
     const Kp_gyro   = 0.6;
-    const DEADZONE_DEG = 5;    // ±5° esneme payı
+    const DEADZONE_DEG = 5;
 
-    // İki fazlı durum makinesi:
-    //   1) 'aligning'  → yerinde dönüp 0°'ı bulur
-    //   2) 'driving'   → ileri/geri hareket ederken 0°'ı korur
     type Phase = 'aligning' | 'driving';
     let phase: Phase = 'aligning';
-    let stableTicks = 0;          // deadzone içinde kaç tick geçti
-    const STABLE_REQUIRED = 4;    // 4×50ms = 200ms stabil olunca sürüşe geç
+    let stableTicks = 0;
+    const STABLE_REQUIRED = 4;
 
     this.addLog(`🎯 Hizalama başladı → hedef 0° (±${DEADZONE_DEG}°)`, 'info');
 
@@ -258,7 +281,7 @@ export class RobotInstance {
       let err = 0;
 
       if (hasCompass && this.state.heading !== undefined) {
-        // Offset'li efektif yön (-180..+180); setpoint zaten 0°
+
         const eff = this.effectiveHeading();
         err = eff !== undefined ? eff : 0;
       } else if (hasImu) {
@@ -271,7 +294,6 @@ export class RobotInstance {
 
       const inDeadzone = Math.abs(err) < DEADZONE_DEG;
 
-      // ─── FAZ 1: yerinde 0°'a hizalan ──────────────────────────
       if (phase === 'aligning') {
         if (inDeadzone) {
           stableTicks++;
@@ -283,7 +305,6 @@ export class RobotInstance {
           stableTicks = 0;
         }
 
-        // Hizalama: vy=0, sadece dön
         const Kused = hasCompass ? Kp_align : Kp_gyro;
         let w = inDeadzone ? 0 : -Kused * err;
         if (w > 1)  w = 1;
@@ -292,7 +313,6 @@ export class RobotInstance {
         return;
       }
 
-      // ─── FAZ 2: sürerken yönü koru ────────────────────────────
       let errCorr = inDeadzone ? 0 : err;
       const Kused = hasCompass ? Kp : Kp_gyro;
       let w = -Kused * errCorr;
@@ -302,7 +322,6 @@ export class RobotInstance {
       this.sendRaw({ cmd: 'drive', vx: 0, vy: dir, w });
     }, 50);
 
-    // Adım sayısı seçilmemişse (0 veya negatif) süresiz → kullanıcı dur basana kadar
     if (steps && steps > 0) {
       const totalMs = Math.max(200, steps * msPerStep);
       this.driveStopTimer = setTimeout(() => this.stopDrive(true), totalMs);
@@ -326,7 +345,7 @@ export class RobotInstance {
 export class RobotService {
   robots: RobotInstance[] = [];
   robots$ = new BehaviorSubject<RobotInstance[]>([]);
-  
+
   teams: Team[] = [];
   teams$ = new BehaviorSubject<Team[]>([]);
 
@@ -364,7 +383,7 @@ export class RobotService {
     const robot = this.robots.find(r => r.config.id === id);
     if (robot) robot.disconnect();
     this.robots = this.robots.filter(r => r.config.id !== id);
-    
+
     if (this.activeRobotId === id) {
       this.activeRobotId = this.robots.length > 0 ? this.robots[0].config.id : null;
     }
@@ -395,8 +414,6 @@ export class RobotService {
     } catch(e) {}
     this.updateState();
   }
-
-  // --- Team Management ---
 
   private saveTeams() {
     localStorage.setItem('teams', JSON.stringify(this.teams));

@@ -1,6 +1,5 @@
 <div class="twin-wrapper" [class.twin-wrapper-fleet]="!!fleetRobots">
 
-  <!-- 3D Scene -->
   <div class="twin-container" #twinContainer>
     <canvas #twinCanvas></canvas>
     <div class="twin-hud-top">
@@ -13,7 +12,6 @@
     </div>
   </div>
 
-  <!-- LOCAL MAP (Team mode only) -->
   <div *ngIf="fleetRobots" class="localmap-panel">
     <div class="localmap-header">
       <div class="localmap-title">
@@ -32,7 +30,6 @@
       <span class="localmap-zoomval">{{mapRange.toFixed(1)}}m</span>
     </div>
 
-    <!-- Placement toolbar -->
     <div class="localmap-tools">
       <button class="tool-btn tool-base"
               [class.active]="placingType === 'base'"
@@ -48,7 +45,6 @@
       </button>
     </div>
 
-    <!-- Map area -->
     <div class="localmap-canvas"
          [class.has-selection]="!!selectedFleetRobotId"
          [class.placing]="!!placingType"
@@ -61,7 +57,6 @@
       <div class="localmap-ring localmap-ring-2"></div>
       <div class="localmap-ring localmap-ring-3"></div>
 
-      <!-- Waypoint markers -->
       <div *ngFor="let wp of waypointMapItems"
            class="localmap-waypoint"
            [class.wp-base]="wp.type === 'base'"
@@ -73,7 +68,6 @@
         <span class="wp-label">{{wp.name}}</span>
       </div>
 
-      <!-- Robot markers -->
       <button *ngFor="let it of fleetMapItems"
               class="localmap-marker"
               [class.selected]="it.selected"
@@ -86,13 +80,11 @@
       </button>
     </div>
 
-    <!-- Selection info -->
     <div class="localmap-info">
       <span class="localmap-info-label">SEÇİLİ</span>
       <span class="localmap-info-value">{{selectedFleetRobotName}}</span>
     </div>
 
-    <!-- Hint -->
     <div class="localmap-hint">
       <span *ngIf="placingType === 'base'">📍 Haritada üs konumuna tıklayın</span>
       <span *ngIf="placingType === 'target'">📍 Haritada hedef konumuna tıklayın</span>
@@ -100,7 +92,6 @@
       <span *ngIf="!placingType && selectedFleetRobotId">② Hedefe tıklayın veya aşağıdan hızlı git komutu seçin</span>
     </div>
 
-    <!-- Waypoint List & Commands -->
     <div *ngIf="waypoints.length > 0" class="localmap-wplist">
       <div class="localmap-wplist-title">📌 İŞARETLİ NOKTALAR</div>
       <div class="localmap-wplist-items">

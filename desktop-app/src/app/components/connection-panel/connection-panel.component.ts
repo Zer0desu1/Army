@@ -7,7 +7,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
 export class ConnectionPanelComponent {
   @Input() ip!: string;
   @Input() status!: 'offline' | 'connecting' | 'online';
-  
+
   @Output() ipChange = new EventEmitter<string>();
   @Output() connect = new EventEmitter<string>();
   @Output() disconnect = new EventEmitter<void>();
@@ -16,7 +16,6 @@ export class ConnectionPanelComponent {
 
   inputVal = '';
 
-  // WiFi provizyon paneli
   showWifiPanel = false;
   wifiSsid = '';
   wifiPass = '';

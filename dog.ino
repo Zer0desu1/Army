@@ -1,47 +1,20 @@
-/*
- * ============================================================
- *  ROBOT KÖPEK — ESP32 + 4 SERVO
- *  Yürüme Gaitaları + Duygu Tabanlı Davranış + WebSocket Kontrol
- * ============================================================
- *  Servo Atamaları:
- *    GPIO 25 → Sol Ön  (FL)
- *    GPIO 26 → Sağ Ön  (FR)
- *    GPIO 19 → Sol Arka (RL)
- *    GPIO 22 → Sağ Arka (RR)
- *
- *  Gerekli Kütüphaneler (Library Manager):
- *    - ESP32Servo
- *    - ArduinoJson (v6.x)
- *    - WebSocketsServer (by Markus Sattler)
- *
- *  Wi-Fi Ayarları:
- *    SSID ve PASSWORD alanlarını kendi ağınıza göre ayarlayın.
- *    Wi-Fi bulunamazsa "RobotKopek" / "kopek1234" AP modu açılır.
- * ============================================================
- */
-
 #include <ESP32Servo.h>
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 
-// ─── Wi-Fi Ayarları ──────────────────────────────────────────
-const char* SSID     = "WIFI_ADINIZ";
-const char* PASSWORD = "WIFI_SIFRENIZ";
+const char* SSID     = "WIFI_ADI";
+const char* PASSWORD = "WIFI_SIFRE";
 
-// ─── Servo Pin Tanımları ─────────────────────────────────────
-#define PIN_FL 25   // Sol Ön
-#define PIN_FR 26   // Sağ Ön
-#define PIN_RL 19   // Sol Arka
-#define PIN_RR 22   // Sağ Arka
+#define PIN_FL 25
+#define PIN_FR 26
+#define PIN_RL 19
+#define PIN_RR 22
 
-// ─── Servo Nesneleri ─────────────────────────────────────────
 Servo servoFL, servoFR, servoRL, servoRR;
 
-// ─── WebSocket Sunucusu (Port 81) ────────────────────────────
 WebSocketsServer webSocket = WebSocketsServer(81);
 
-// ─── Duygu Durumları ─────────────────────────────────────────
 enum Emotion {
   NEUTRAL  = 0,
   HAPPY    = 1,
@@ -52,20 +25,18 @@ enum Emotion {
   SLEEPY   = 6
 };
 
-// ─── Robot Durumu ────────────────────────────────────────────
 struct RobotState {
   Emotion emotion     = NEUTRAL;
   bool    isWalking   = false;
   bool    isSitting   = false;
-  int     speed       = 50;         // 0–100
-  int     stepDelay   = 200;        // ms
+  int     speed       = 50;
+  int     stepDelay   = 200;
   unsigned long lastAction = 0;
   unsigned long idleTime   = 0;
 };
 
 RobotState robot;
 
-// Akıllı bekleme: Beklerken WebSocket mesajlarını işlemeye devam eder.
 void smartDelay(unsigned long ms) {
   unsigned long start = millis();
   while (millis() - start < ms) {
@@ -75,13 +46,11 @@ void smartDelay(unsigned long ms) {
 }
 #define delay smartDelay
 
-// ─── Servo Orta Pozisyonları (Kalibrasyon için ayarlayın) ────
 const int CENTER_FL = 90;
 const int CENTER_FR = 90;
 const int CENTER_RL = 90;
 const int CENTER_RR = 90;
 
-// ─── Yardımcı Fonksiyon: Tüm Servolar Orta ──────────────────
 void allCenter() {
   servoFL.write(CENTER_FL);
   servoFR.write(CENTER_FR);
@@ -89,7 +58,6 @@ void allCenter() {
   servoRR.write(CENTER_RR);
 }
 
-// ─── Oturma Pozu ─────────────────────────────────────────────
 void sitDown() {
   servoFL.write(CENTER_FL + 30);
   servoFR.write(CENTER_FR - 30);
@@ -99,56 +67,58 @@ void sitDown() {
   robot.isWalking = false;
 }
 
-// ─── Ayağa Kalkma ────────────────────────────────────────────
 void standUp() {
   allCenter();
   delay(300);
   robot.isSitting = false;
 }
 
-// ─── İleri Yürüme Gaitası (Çapraz çift destek) ───────────────
+static inline void setLegs(int phaseA, int phaseB) {
+
+  servoFL.write(CENTER_FL + phaseA);
+  servoRR.write(CENTER_RR - phaseA);
+  servoFR.write(CENTER_FR - phaseB);
+  servoRL.write(CENTER_RL + phaseB);
+}
+
 void walkForward(int steps) {
   robot.isWalking = true;
   robot.isSitting = false;
   int d = map(robot.speed, 0, 100, 400, 80);
 
-  // SWING açısı: havadaki bacağın ne kadar ileri sallandığı
-  const int SWING = 30;
-  // PUSH açısı: yerdeki bacağın gövdeyi ne kadar ittiği
-  const int PUSH  = 20;
+  const int STRIDE = 30;
+  const int RES    = 12;
+
+  setLegs(STRIDE, -STRIDE);
+  delay(d / 4);
 
   for (int i = 0; i < steps; i++) {
     if (!robot.isWalking) break;
 
-    // ── Faz 1 ──────────────────────────────────────────────
-    // FL + RR → ileri sallan (havada)
-    // FR + RL → geri it     (yerde, gövdeyi öne taşı)
-    servoFL.write(CENTER_FL + SWING);   // FL ileri
-    servoRR.write(CENTER_RR - SWING);   // RR ileri
-    servoFR.write(CENTER_FR + PUSH);    // FR geri it
-    servoRL.write(CENTER_RL - PUSH);    // RL geri it
-    delay(d / 2);
+    for (int k = 1; k <= RES; k++) {
+      int a = STRIDE - (2 * STRIDE * k) / RES;
+      int b = (k <= RES / 2)
+        ? -STRIDE + (4 * STRIDE * k) / RES
+        : STRIDE;
+      setLegs(a, b);
+      delay(d / RES);
+    }
 
-    // Hepsini merkeze al (geçiş)
-    allCenter();
-    delay(d / 4);
+    if (!robot.isWalking) break;
 
-    // ── Faz 2 ──────────────────────────────────────────────
-    // FR + RL → ileri sallan (havada)
-    // FL + RR → geri it     (yerde, gövdeyi öne taşı)
-    servoFR.write(CENTER_FR - SWING);   // FR ileri
-    servoRL.write(CENTER_RL + SWING);   // RL ileri
-    servoFL.write(CENTER_FL - PUSH);    // FL geri it
-    servoRR.write(CENTER_RR + PUSH);    // RR geri it
-    delay(d / 2);
-
-    // Merkeze al
-    allCenter();
-    delay(d / 4);
+    for (int k = 1; k <= RES; k++) {
+      int b = STRIDE - (2 * STRIDE * k) / RES;
+      int a = (k <= RES / 2)
+        ? -STRIDE + (4 * STRIDE * k) / RES
+        : STRIDE;
+      setLegs(a, b);
+      delay(d / RES);
+    }
   }
+
+  allCenter();
 }
 
-// ─── Geri Yürüme Gaitası ─────────────────────────────────────
 void walkBackward(int steps) {
   robot.isWalking = true;
   int d = map(robot.speed, 0, 100, 400, 80);
@@ -159,7 +129,6 @@ void walkBackward(int steps) {
   for (int i = 0; i < steps; i++) {
     if (!robot.isWalking) break;
 
-    // Faz 1: FL + RR geri sallan, FR + RL ileri it
     servoFL.write(CENTER_FL - SWING);
     servoRR.write(CENTER_RR + SWING);
     servoFR.write(CENTER_FR - PUSH);
@@ -168,7 +137,6 @@ void walkBackward(int steps) {
     allCenter();
     delay(d / 4);
 
-    // Faz 2: FR + RL geri sallan, FL + RR ileri it
     servoFR.write(CENTER_FR + SWING);
     servoRL.write(CENTER_RL - SWING);
     servoFL.write(CENTER_FL + PUSH);
@@ -179,7 +147,6 @@ void walkBackward(int steps) {
   }
 }
 
-// ─── Sola Dönme ──────────────────────────────────────────────
 void turnLeft(int steps) {
   robot.isWalking = true;
   int d = map(robot.speed, 0, 100, 400, 100);
@@ -187,7 +154,6 @@ void turnLeft(int steps) {
   for (int i = 0; i < steps; i++) {
     if (!robot.isWalking) break;
 
-    // Sol bacaklar geri, sağ bacaklar ileri
     servoFL.write(CENTER_FL - 20);
     servoRL.write(CENTER_RL - 20);
     delay(d / 2);
@@ -199,7 +165,6 @@ void turnLeft(int steps) {
   }
 }
 
-// ─── Sağa Dönme ──────────────────────────────────────────────
 void turnRight(int steps) {
   robot.isWalking = true;
   int d = map(robot.speed, 0, 100, 400, 100);
@@ -218,11 +183,6 @@ void turnRight(int steps) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  DUYGU DAVRANIŞLARI
-// ═══════════════════════════════════════════════════════════════
-
-// Mutlu: Kuyruk sallama (arka servo sallantısı)
 void behaviorHappy() {
   for (int i = 0; i < 4; i++) {
     servoRR.write(CENTER_RR + 30);
@@ -235,7 +195,6 @@ void behaviorHappy() {
   allCenter();
 }
 
-// Heyecanlı: Yerinde koşma hareketi
 void behaviorExcited() {
   for (int i = 0; i < 6; i++) {
     servoFL.write(CENTER_FL + 35);
@@ -248,7 +207,6 @@ void behaviorExcited() {
   allCenter();
 }
 
-// Üzgün: Yavaş baş sallama + eğilme
 void behaviorSad() {
   servoFL.write(CENTER_FL + 15);
   servoFR.write(CENTER_FR - 15);
@@ -261,7 +219,6 @@ void behaviorSad() {
   allCenter();
 }
 
-// Korkmuş: Titreme
 void behaviorScared() {
   for (int i = 0; i < 8; i++) {
     servoFL.write(CENTER_FL + 8);
@@ -278,7 +235,6 @@ void behaviorScared() {
   allCenter();
 }
 
-// Sinirli: Hızlı ayak vurma
 void behaviorAngry() {
   for (int i = 0; i < 3; i++) {
     servoFL.write(CENTER_FL + 40);
@@ -292,7 +248,6 @@ void behaviorAngry() {
   }
 }
 
-// Uykulu: Yavaşça çöküş
 void behaviorSleepy() {
   for (int angle = 0; angle <= 20; angle += 2) {
     servoFL.write(CENTER_FL + angle);
@@ -303,7 +258,6 @@ void behaviorSleepy() {
   }
 }
 
-// Selamlama: Ön pençe kaldırma
 void behaviorGreet() {
   servoFL.write(CENTER_FL + 60);
   delay(600);
@@ -314,7 +268,6 @@ void behaviorGreet() {
   servoFL.write(CENTER_FL);
 }
 
-// ─── Duygu uygula ────────────────────────────────────────────
 void applyEmotion(Emotion e) {
   robot.emotion = e;
   switch (e) {
@@ -328,51 +281,31 @@ void applyEmotion(Emotion e) {
   }
 }
 
-// ─── Boşta kalma davranışı ───────────────────────────────────
 void idleBehavior() {
   unsigned long now = millis();
-  if (now - robot.lastAction > 10000) {  // 10 saniye hareketsizlik
+  if (now - robot.lastAction > 10000) {
     robot.idleTime += now - robot.lastAction;
     robot.lastAction = now;
 
     int r = random(0, 4);
     switch (r) {
-      case 0: behaviorHappy();  break;  // Rastgele mutlu
-      case 1:                           // Etrafına bak
+      case 0: behaviorHappy();  break;
+      case 1:
         servoFL.write(CENTER_FL + 20);
         servoFR.write(CENTER_FR - 20);
         delay(500);
         allCenter();
         break;
-      case 2: behaviorSleepy(); break;  // Uykulu hisset
-      case 3: behaviorGreet();  break;  // Selamla
+      case 2: behaviorSleepy(); break;
+      case 3: behaviorGreet();  break;
     }
   }
 
-  // 30 saniye hareketsizse otur
   if (robot.idleTime > 30000 && !robot.isSitting) {
     sitDown();
     robot.emotion = SLEEPY;
   }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  WEB SOCKET — KOMUT İŞLEME
-// ═══════════════════════════════════════════════════════════════
-
-/*
- * Gelen JSON formatı:
- * { "cmd": "walk",    "value": 10  }
- * { "cmd": "emotion", "value": "happy" }
- * { "cmd": "speed",   "value": 75  }
- * { "cmd": "stop"                  }
- * { "cmd": "sit"                   }
- * { "cmd": "stand"                 }
- * { "cmd": "greet"                 }
- * { "cmd": "back"                  }
- * { "cmd": "left"                  }
- * { "cmd": "right"                 }
- */
 
 void sendStatus() {
   const char* emotionNames[] = {"neutral","happy","sad","excited","scared","angry","sleepy"};
@@ -403,7 +336,7 @@ void processCommand(String msg) {
   Serial.print("Komut: "); Serial.println(cmd);
 
   if (cmd == "walk") {
-    if (robot.isWalking) return; // Zaten yürüyorsa yeni komutu yoksay
+    if (robot.isWalking) return;
     int steps = doc["value"] | 5;
     standUp();
     walkForward(steps);
@@ -463,7 +396,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
   switch (type) {
     case WStype_CONNECTED:
       Serial.printf("İstemci #%u bağlandı\n", num);
-      sendStatus();  // Bağlanan istemciye mevcut durumu gönder
+      sendStatus();
       break;
     case WStype_DISCONNECTED:
       Serial.printf("İstemci #%u ayrıldı\n", num);
@@ -476,15 +409,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SETUP & LOOP
-// ═══════════════════════════════════════════════════════════════
-
 void setup() {
   Serial.begin(115200);
   Serial.println("\n🐾 Robot Köpek başlatılıyor...");
 
-  // Servo başlatma
   servoFL.attach(PIN_FL, 500, 2400);
   servoFR.attach(PIN_FR, 500, 2400);
   servoRL.attach(PIN_RL, 500, 2400);
@@ -492,10 +420,8 @@ void setup() {
   allCenter();
   delay(500);
 
-  // Başlangıç animasyonu
   behaviorHappy();
 
-  // Wi-Fi bağlantısı
   WiFi.begin(SSID, PASSWORD);
   Serial.print("Wi-Fi bağlanıyor");
   int tries = 0;
@@ -507,7 +433,7 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n✅ Bağlandı! IP: " + WiFi.localIP().toString());
-    behaviorExcited();  // Wi-Fi bulununca heyecanlan
+    behaviorExcited();
   } else {
     Serial.println("\n⚠️ Wi-Fi bulunamadı, AP modu başlatılıyor...");
     WiFi.softAP("RobotKopek", "kopek1234");
@@ -515,7 +441,6 @@ void setup() {
     applyEmotion(SAD);
   }
 
-  // WebSocket başlat
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
   Serial.println("🔌 WebSocket sunucusu port 81'de başladı");
@@ -526,7 +451,6 @@ void setup() {
 void loop() {
   webSocket.loop();
 
-  // Boşta kalma davranışı
   if (!robot.isWalking && !robot.isSitting) {
     idleBehavior();
   }

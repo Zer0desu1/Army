@@ -8,11 +8,11 @@ import { EMOTIONS } from '../emotion-panel/emotion-panel.component';
 })
 export class DogDisplayComponent {
   @Input() robotState!: RobotState;
-  
+
   get emotionName() {
     return this.robotState.emotionName || 'neutral';
   }
-  
+
   get emotionObj() {
     return EMOTIONS.find(e => e.id === this.emotionName) || EMOTIONS.find(e => e.id === 'neutral')!;
   }

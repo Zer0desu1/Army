@@ -10,7 +10,7 @@ import * as cocoSsd from '@tensorflow-models/coco-ssd';
 export class AppComponent implements OnInit {
   robots: RobotInstance[] = [];
   activeRobot: RobotInstance | null = null;
-  
+
   showAddModal = false;
   editingRobotId: string | null = null;
   syncMode = false;
@@ -21,12 +21,10 @@ export class AppComponent implements OnInit {
     this.teamSidebarCollapsed = !this.teamSidebarCollapsed;
   }
 
-  // Takım üyesi için status bilgisi (online/offline/connecting)
   getTeamMember(id: string) {
     return this.robotService.robots.find(r => r.config.id === id);
   }
-  
-  // Robot Builder State
+
   builderStep = 1;
   availableModules = [
     { id: 'camera', name: 'ESP32-CAM', icon: '📷', desc: 'Video akışı ve yapay zeka' },
@@ -38,7 +36,6 @@ export class AppComponent implements OnInit {
     { id: 'compass', name: 'Pusula (QMC5883L)', icon: '🧭', desc: 'Yön kilidi, manyetik kuzey' }
   ];
 
-  // Modal form data
   formData: RobotConfig = {
     id: '',
     name: 'Yeni Robot',
@@ -51,7 +48,6 @@ export class AppComponent implements OnInit {
 
   steps = 5;
 
-  // AI State
   aiEnabled = false;
   isAiLoading = false;
   aiModel: cocoSsd.ObjectDetection | null = null;
@@ -72,8 +68,7 @@ export class AppComponent implements OnInit {
   teams: Team[] = [];
   activeTeam: Team | null = null;
   selectedFleetRobotId: string | null = null;
-  
-  // Modal for Teams
+
   showTeamModal = false;
   teamFormData: Team = { id: '', name: 'Yeni Takım', robotIds: [], spacing: 0.5 };
 
@@ -82,7 +77,7 @@ export class AppComponent implements OnInit {
   ngOnInit() {
     this.robotService.robots$.subscribe(r => this.robots = r);
     this.robotService.activeRobot$.subscribe(r => {
-      // Only set active robot if we don't have an active team, or if activeTeam is null
+
       if (!this.activeTeam) {
         this.activeRobot = r;
       }
@@ -91,7 +86,7 @@ export class AppComponent implements OnInit {
        this.teams = t;
        if (this.activeTeam) {
          this.activeTeam = this.teams.find(tm => tm.id === this.activeTeam!.id) || null;
-         if (!this.activeTeam) this.selectRobot(this.robots[0]); // fallback
+         if (!this.activeTeam) this.selectRobot(this.robots[0]);
        }
     });
   }
@@ -122,8 +117,7 @@ export class AppComponent implements OnInit {
   onFleetRobotMove(event: {id: string, cmd: string, steps?: number}) {
     const r = this.robotService.robots.find(robot => robot.config.id === event.id);
     if (!r) return;
-    // Mesafe-bazlı dinamik adım sayısı: haritadan gelen `steps` varsa onu kullan,
-    // yoksa global slider değerine düş.
+
     const stepsToUse = event.steps !== undefined ? event.steps : this.steps;
     this.optimisticStateUpdate(r, event.cmd, stepsToUse);
     if (r.status === 'online') r.send(event.cmd, stepsToUse);
@@ -222,7 +216,7 @@ export class AppComponent implements OnInit {
 
   openEditModal(robot: RobotInstance) {
     this.editingRobotId = robot.config.id;
-    this.builderStep = 3; // Go straight to network config for edits
+    this.builderStep = 3;
     this.formData = { ...robot.config, modules: robot.config.modules || [] };
     this.showAddModal = true;
   }
@@ -249,7 +243,7 @@ export class AppComponent implements OnInit {
   saveRobot() {
     if (!this.formData.modules) this.formData.modules = [];
     this.formData.hasCamera = this.formData.modules.includes('camera');
-    
+
     if (this.editingRobotId) {
       this.robotService.updateRobotConfig(this.editingRobotId, this.formData);
     } else {
@@ -265,7 +259,6 @@ export class AppComponent implements OnInit {
     }
   }
 
-  // Active Robot Actions
   connectActive() {
     if (this.syncMode) {
       this.robotService.robots.forEach(r => r.connect());
@@ -294,11 +287,9 @@ export class AppComponent implements OnInit {
     }
   }
 
-  // Heading-hold artık ESP32 tarafında — app sadece walk/back N gönderir,
-  // robot kendi step sayısı kadar düz çizgide gider ve durur.
   private dispatchMove(r: any, cmd: string, value: any) {
     if (cmd === 'stop') {
-      r.stopDrive?.(false);   // varsa eski app-tarafı döngüyü iptal et
+      r.stopDrive?.(false);
     }
     r.send(cmd, value);
   }
@@ -312,7 +303,7 @@ export class AppComponent implements OnInit {
         }
       });
     } else if (this.activeTeam) {
-      // If a single robot is selected on the local map, target only it; otherwise broadcast.
+
       const targetIds = this.selectedFleetRobotId
         ? [this.selectedFleetRobotId]
         : this.activeTeam.robotIds;
@@ -336,15 +327,14 @@ export class AppComponent implements OnInit {
   }
 
   private optimisticStateUpdate(r: any, cmd: string, value: any) {
-    const moveCmds = ['walk', 'back', 'left', 'right'];
+    const moveCmds = ['walk', 'back', 'left', 'right', 'strafeLeft', 'strafeRight'];
     if (moveCmds.includes(cmd)) {
       r.state = { ...r.state, walking: true, sitting: false };
-      
-      // Stop the animation after roughly the steps duration
-      const msPerStep = 600; 
+
+      const msPerStep = 600;
       const steps = value ? Number(value) : 1;
       setTimeout(() => {
-        // Double check if walking wasn't manually stopped in the meantime
+
         if (r.state.walking) {
            r.state = { ...r.state, walking: false };
         }
@@ -365,7 +355,26 @@ export class AppComponent implements OnInit {
     this.sendCommand('speed', val);
   }
 
-  // Pusula offset kalibrasyonu — robotun şu anki yönünü "ileri" olarak işaretle
+  sendPidActive(values: { kp?: number; ki?: number }) {
+    if (this.syncMode) {
+      this.robotService.robots.forEach(r => {
+        if (r.status === 'online') r.sendPid(values);
+      });
+    } else if (this.activeRobot && this.activeRobot.status === 'online') {
+      this.activeRobot.sendPid(values);
+    }
+  }
+
+  sendTrimActive(rev: number) {
+    if (this.syncMode) {
+      this.robotService.robots.forEach(r => {
+        if (r.status === 'online') r.sendTrim(rev);
+      });
+    } else if (this.activeRobot && this.activeRobot.status === 'online') {
+      this.activeRobot.sendTrim(rev);
+    }
+  }
+
   zeroHeading() {
     if (this.activeRobot && this.activeRobot.zeroHeading()) {
       this.robotService.updateRobotConfig(this.activeRobot.config.id, this.activeRobot.config);
@@ -393,11 +402,14 @@ export class AppComponent implements OnInit {
     if (!this.activeRobot || this.activeRobot.status !== 'online') return;
     if ((event.target as HTMLElement).tagName === 'INPUT' || (event.target as HTMLElement).tagName === 'SELECT') return;
 
+    const omni4 = this.activeRobot.config.type === 'omni4';
     switch (event.key) {
       case 'ArrowUp':    event.preventDefault(); this.sendCommand('walk', this.steps);  break;
       case 'ArrowDown':  event.preventDefault(); this.sendCommand('back', this.steps);  break;
-      case 'ArrowLeft':  event.preventDefault(); this.sendCommand('left', this.steps);  break;
-      case 'ArrowRight': event.preventDefault(); this.sendCommand('right', this.steps); break;
+      case 'ArrowLeft':  event.preventDefault(); this.sendCommand(omni4 ? 'strafeLeft'  : 'left',  this.steps); break;
+      case 'ArrowRight': event.preventDefault(); this.sendCommand(omni4 ? 'strafeRight' : 'right', this.steps); break;
+      case 'q': case 'Q': if (omni4) this.sendCommand('left',  this.steps); break;
+      case 'e': case 'E': if (omni4) this.sendCommand('right', this.steps); break;
       case ' ':          event.preventDefault(); this.sendCommand('stop');         break;
       case 's':          this.sendCommand('sit');   break;
       case 'f':          this.sendCommand('stand'); break;
@@ -405,7 +417,6 @@ export class AppComponent implements OnInit {
     }
   }
 
-  // --- AI Vision Methods ---
   aiFps = 0;
   private aiLastTime = 0;
   private aiFrameCount = 0;
@@ -417,10 +428,10 @@ export class AppComponent implements OnInit {
       this.isAiLoading = true;
       try {
         if (!this.aiModel) {
-          // WebGL backend'i kullan (GPU hızlandırma)
+
           await tf.setBackend('webgl');
           await tf.ready();
-          // mobilenet_v2 daha doğru classification yapar
+
           this.aiModel = await cocoSsd.load({ base: 'mobilenet_v2' });
         }
         this.isAiLoading = false;
@@ -453,11 +464,10 @@ export class AppComponent implements OnInit {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         try {
-          // Düşük güvenli sonuçları filtrele, en fazla 20 nesne döndür
+
           const predictions = await this.aiModel.detect(img, 20, 0.4);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-          // Ölçek oranları (natural -> client boyutu)
           const scaleX = canvas.width / img.naturalWidth;
           const scaleY = canvas.height / img.naturalHeight;
 
@@ -469,13 +479,11 @@ export class AppComponent implements OnInit {
             const isPerson = p.class === 'person';
             const color = isPerson ? '#10b981' : '#a855f7';
             const score = Math.round(p.score * 100);
-            
-            // Kutu çiz
+
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.strokeRect(x, y, w, h);
-            
-            // Etiket arka planı
+
             const label = `${p.class} ${score}%`;
             ctx.font = 'bold 13px Inter, sans-serif';
             const textW = ctx.measureText(label).width + 8;
@@ -485,13 +493,11 @@ export class AppComponent implements OnInit {
             ctx.globalAlpha = 0.85;
             ctx.fillRect(x, textY, textW, textH);
             ctx.globalAlpha = 1;
-            
-            // Etiket yazısı
+
             ctx.fillStyle = '#fff';
             ctx.fillText(label, x + 4, textY + 14);
           });
 
-          // FPS Hesapla
           this.aiFrameCount++;
           const now = performance.now();
           if (now - this.aiLastTime >= 1000) {
@@ -500,12 +506,11 @@ export class AppComponent implements OnInit {
             this.aiLastTime = now;
           }
         } catch (e) {
-          // Stream hataları sessizce yoksay
+
         }
       }
     }
-    
-    // Bir sonraki kareyi 100ms sonra işle (~10 FPS hedef, UI donmaz)
+
     if (this.aiRunning) {
       setTimeout(() => this.runAiLoop(), 100);
     }

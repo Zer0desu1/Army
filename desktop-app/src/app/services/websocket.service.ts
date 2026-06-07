@@ -49,7 +49,7 @@ export class WebsocketService {
     if (this.ws) {
       this.ws.close();
     }
-    
+
     this.status$.next('connecting');
     this.addLog(`Bağlanıyor → ws://${ip.trim()}:${this.WS_PORT}`, 'info');
 
