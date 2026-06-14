@@ -264,7 +264,7 @@
       </div>
     </aside>
 
-    <main style="display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 16px; padding: 16px; position: relative; overflow-y: auto;">
+    <main style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; place-items: start center; gap: 16px; padding: 16px 16px 32px; position: relative; overflow-y: auto; min-height: 0;">
 
       <div *ngIf="activeRobot && activeRobot.config.modules?.includes('camera')" class="camera-container glass-panel">
          <div class="camera-overlay" *ngIf="!activeRobot?.config?.camIp">Kamera IP'si girilmedi</div>
@@ -274,6 +274,7 @@
                 [src]="'http://' + activeRobot?.config?.camIp + ':81/stream?t=' + camTimestamp"
                 class="camera-feed"
                 crossOrigin="anonymous"
+                (load)="onCamFeedLoad()"
                 alt="Kamera Akışı Bekleniyor..." />
 
            <canvas id="active-ai-canvas" class="ai-canvas"></canvas>
@@ -285,7 +286,76 @@
            <button class="cam-refresh-btn" (click)="refreshCamera()">
              🔄 Yenile
            </button>
+
+           <!-- Otonom ArUco kilitlenme -->
+           <button *ngIf="activeRobot?.config?.type === 'omni4'"
+                   class="ai-toggle-btn"
+                   [class.active]="lockEnabled"
+                   style="top: 52px;"
+                   (click)="toggleLock()"
+                   [title]="'Önündeki cyber\'ın id=' + lockParams.markerId + ' markerına otonom kilitlen ve convoy bağla'">
+             🎯 {{ lockEnabled ? 'Kilit: ' + lockStateLabel : 'Otonom Bağlan' }}
+           </button>
+
+           <div *ngIf="(lockEnabled || lockDetecting) && lockObs" class="lock-hud"
+                style="position: absolute; top: 90px; left: 8px; z-index: 6; font-size: 11px; font-family: monospace; background: rgba(0,0,0,0.55); padding: 6px 8px; border-radius: 6px; line-height: 1.5; pointer-events: none;">
+             <div [style.color]="lockObs.state === 'locked' ? '#10b981' : (lockObs.found ? '#f59e0b' : '#ef4444')">
+               ● {{ lockStateLabel }}
+             </div>
+             <div>marker: {{ lockObs.found ? 'görüldü' : 'yok' }}</div>
+             <div *ngIf="lockObs.z !== undefined">mesafe: {{ lockObs.z | number:'1.0-0' }} mm (hedef {{ lockParams.targetZmm }})</div>
+             <div *ngIf="lockObs.latNorm !== undefined">yanal: {{ lockObs.latNorm | number:'1.2-2' }}</div>
+             <div>vx {{ lockObs.vx | number:'1.2-2' }} · vy {{ lockObs.vy | number:'1.2-2' }} · w {{ lockObs.w | number:'1.2-2' }}</div>
+             <div>{{ lockObs.fps }} FPS</div>
+           </div>
+
+           <button *ngIf="activeRobot?.config?.type === 'omni4'"
+                   class="cam-refresh-btn"
+                   style="top: 52px;"
+                   (click)="lockShowParams = !lockShowParams"
+                   title="Kilitlenme parametreleri">
+             ⚙️ Ayar
+           </button>
          </ng-container>
+      </div>
+
+      <!-- Otonom kilitlenme parametreleri -->
+      <div *ngIf="lockShowParams && activeRobot?.config?.type === 'omni4'"
+           class="glass-panel" style="padding: 14px; width: 100%; max-width: 520px;">
+        <div class="section-label" style="margin-bottom: 10px;">🎯 Kilitlenme Ayarları</div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px; font-size: 11px;">
+          <label style="display: flex; flex-direction: column; gap: 2px;">Marker ID
+            <input type="number" [(ngModel)]="lockParams.markerId" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Marker boyu (mm)
+            <input type="number" [(ngModel)]="lockParams.markerSizeMm" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Odak (focal px)
+            <input type="number" [(ngModel)]="lockParams.focalPx" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Hedef mesafe (mm)
+            <input type="number" [(ngModel)]="lockParams.targetZmm" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Mesafe tol. (mm)
+            <input type="number" [(ngModel)]="lockParams.zTolMm" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Yanal tol. (0–1)
+            <input type="number" step="0.01" [(ngModel)]="lockParams.latTol" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Kp ileri/geri
+            <input type="number" step="0.0001" [(ngModel)]="lockParams.kpVy" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Kp yanal
+            <input type="number" step="0.1" [(ngModel)]="lockParams.kpVx" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Max hız (0–1)
+            <input type="number" step="0.05" [(ngModel)]="lockParams.maxV" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Tarama hızı
+            <input type="number" step="0.05" [(ngModel)]="lockParams.searchW" style="padding: 4px;"></label>
+          <label style="display: flex; flex-direction: column; gap: 2px;">Servo kilit açısı
+            <input type="number" [(ngModel)]="lockParams.servoLatch" style="padding: 4px;"></label>
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 16px;">
+            <input type="checkbox" [(ngModel)]="lockParams.useStrafe"> Yanal = strafe (kapalı: dönüş)</label>
+        </div>
+        <button class="dpad-btn" (click)="applyLockParams()"
+                style="margin-top: 10px; padding: 6px 12px; font-size: 11px; font-weight: 600;">
+          Uygula (canlı)
+        </button>
+        <div style="font-size: 9px; opacity: 0.55; margin-top: 6px; line-height: 1.4;">
+          Odak px: QVGA/320px akışta ~280 başla; mesafe yanlışsa kalibre et. Marker'ı js-aruco2 üretecinden ({{ lockParams.dictionaryName }}, id={{ lockParams.markerId }}) bas, cyber'ın arkasına yapıştır.
+        </div>
       </div>
 
       <div class="glass-panel twin-panel" [class.twin-panel-fleet]="!!activeTeam">
@@ -315,7 +385,7 @@
         </app-movement-pad>
       </div>
 
-      <div *ngIf="!activeTeam" style="display: flex; gap: 12px; font-size: 10px; color: var(--text-muted); flex-wrap: wrap; justify-content: center;">
+      <div *ngIf="!activeTeam" style="grid-column: 1 / -1; display: flex; gap: 12px; font-size: 10px; color: var(--text-muted); flex-wrap: wrap; justify-content: center;">
         <span>↑ İleri</span><span>↓ Geri</span>
         <ng-container *ngIf="activeRobot?.config?.type === 'omni4'; else turnHint">
           <span>← Sola Kay</span><span>→ Sağa Kay</span><span>Q/E Dön</span>

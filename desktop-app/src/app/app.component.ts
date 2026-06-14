@@ -1,5 +1,6 @@
 import { Component, HostListener, OnInit } from '@angular/core';
 import { RobotConfig, RobotInstance, RobotService, RobotType, Team } from './services/robot.service';
+import { ArucoLockService, LockObservation, LockParams, DEFAULT_LOCK_PARAMS } from './services/aruco-lock.service';
 import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
@@ -59,6 +60,107 @@ export class AppComponent implements OnInit {
     this.camTimestamp = Date.now();
   }
 
+  // ── Otonom ArUco kilitlenme ──────────────────────────────────
+  lockEnabled = false;
+  lockDetecting = false;   // motorsuz otomatik tespit aktif mi
+  lockObs: LockObservation | null = null;
+  lockShowParams = false;
+  lockParams: LockParams = { ...DEFAULT_LOCK_PARAMS };
+  private readonly lockStateLabels: Record<string, string> = {
+    idle: 'Kapalı',
+    detecting: 'Tespit…',
+    searching: 'Aranıyor…',
+    approaching: 'Yaklaşıyor',
+    locking: 'Hizalanıyor',
+    locked: 'KİLİTLENDİ',
+  };
+
+  get lockStateLabel(): string {
+    return this.lockObs ? (this.lockStateLabels[this.lockObs.state] ?? this.lockObs.state) : 'Kapalı';
+  }
+
+  async toggleLock() {
+    if (this.lockEnabled) {
+      this.arucoLock.stop();
+      this.lockEnabled = false;
+      this.startAutoDetect();   // tam kilit kapandı → motorsuz tespite geri dön
+      return;
+    }
+
+    const robot = this.activeRobot;
+    if (!robot || robot.status !== 'online') {
+      robot?.addLog('⚠ Kilitlenme için robot bağlı olmalı', 'error');
+      return;
+    }
+    if (!robot.config.camIp) {
+      robot.addLog('⚠ Kamera IP girilmemiş — kilitlenme için akış gerekli', 'error');
+      return;
+    }
+
+    const img = document.getElementById('active-cam-feed') as HTMLImageElement;
+    const overlay = document.getElementById('active-ai-canvas') as HTMLCanvasElement;
+    if (!img || !overlay) return;
+
+    // YZ ve motorsuz tespit aynı canvas'ı/servisi paylaşır — tam kilitten önce durdur
+    if (this.aiEnabled) { this.aiRunning = false; this.aiEnabled = false; this.clearCanvas(); }
+    this.stopAutoDetect();
+
+    try {
+      await this.arucoLock.start({
+        img,
+        overlay,
+        send: (obj) => robot.sendRaw(obj),
+        log: (msg, type) => robot.addLog(msg, (type as any) ?? 'info'),
+        params: this.lockParams,
+      });
+      this.lockEnabled = true;
+    } catch (err: any) {
+      robot.addLog(`⚠ Kilitlenme başlatılamadı: ${err?.message ?? err}`, 'error');
+      this.lockEnabled = false;
+    }
+  }
+
+  /** Kamera verisi gelince motorsuz otomatik tespit (sadece overlay/HUD; robota komut gitmez). */
+  async startAutoDetect() {
+    const robot = this.activeRobot;
+    if (!robot || robot.config.type !== 'omni4' || !robot.config.camIp) return;
+    if (this.aiEnabled || this.lockEnabled) return;            // AI ya da tam kilit açıkken çalışma
+    if (this.lockDetecting || this.arucoLock.isRunning()) return;
+
+    const img = document.getElementById('active-cam-feed') as HTMLImageElement;
+    const overlay = document.getElementById('active-ai-canvas') as HTMLCanvasElement;
+    if (!img || !overlay) return;
+
+    try {
+      await this.arucoLock.start({
+        img,
+        overlay,
+        send: () => false,        // motorsuz: hiçbir komut gönderme
+        log: (msg, type) => robot.addLog(msg, (type as any) ?? 'info'),
+        params: this.lockParams,
+        detectOnly: true,
+      });
+      this.lockDetecting = true;
+    } catch (err: any) {
+      robot.addLog(`⚠ Otomatik tespit başlatılamadı: ${err?.message ?? err}`, 'error');
+    }
+  }
+
+  stopAutoDetect() {
+    if (!this.lockDetecting) return;
+    this.arucoLock.stop(false);   // motorsuz — komut göndermeden durdur
+    this.lockDetecting = false;
+  }
+
+  /** Kamera <img> bir kare yükleyince ("kamera verisi var") tespiti otomatik başlatır. */
+  onCamFeedLoad() {
+    this.startAutoDetect();
+  }
+
+  applyLockParams() {
+    this.arucoLock.updateParams(this.lockParams);
+  }
+
   actionButtons = [
     { cmd: 'sit',   icon: '🪑', label: 'Otur' },
     { cmd: 'stand', icon: '🦴', label: 'Kalk' },
@@ -72,9 +174,10 @@ export class AppComponent implements OnInit {
   showTeamModal = false;
   teamFormData: Team = { id: '', name: 'Yeni Takım', robotIds: [], spacing: 0.5 };
 
-  constructor(public robotService: RobotService) {}
+  constructor(public robotService: RobotService, private arucoLock: ArucoLockService) {}
 
   ngOnInit() {
+    this.arucoLock.obs$.subscribe(o => this.lockObs = o);
     this.robotService.robots$.subscribe(r => this.robots = r);
     this.robotService.activeRobot$.subscribe(r => {
 
@@ -92,6 +195,8 @@ export class AppComponent implements OnInit {
   }
 
   selectRobot(robot: RobotInstance) {
+    if (this.lockEnabled) { this.arucoLock.stop(); this.lockEnabled = false; }
+    this.stopAutoDetect();   // yeni robotun akışı yüklenince (load) tekrar başlatır
     this.activeTeam = null;
     this.robotService.setActiveRobot(robot.config.id);
   }
@@ -423,6 +528,11 @@ export class AppComponent implements OnInit {
   private aiRunning = false;
 
   async toggleAI() {
+    // YZ, tam kilit ve motorsuz tespit aynı canvas'ı paylaşır — YZ açılırken hepsini durdur
+    if (!this.aiEnabled) {
+      if (this.lockEnabled) { this.arucoLock.stop(); this.lockEnabled = false; }
+      this.stopAutoDetect();
+    }
     this.aiEnabled = !this.aiEnabled;
     if (this.aiEnabled) {
       this.isAiLoading = true;
@@ -446,6 +556,7 @@ export class AppComponent implements OnInit {
       this.aiRunning = false;
       this.clearCanvas();
       this.aiFps = 0;
+      this.startAutoDetect();   // YZ kapandı → motorsuz tespite geri dön
     }
   }
 
